@@ -1,0 +1,51 @@
+/* ==========================================================================
+   Easy-Social V2 — Design Tokens
+   "Liquid Glass / Ghost Green" — concept by Xandão
+   --------------------------------------------------------------------------
+   Princípios:
+   - Deep Ink (#0B0E14) é o vazio que faz o vidro existir
+   - Ghost Green (#3DF24B) é LUZ, nunca tinta sólida
+   - Blush Frost (#F0D1E5) é o contraste elegante (luz batendo no vidro)
+   ========================================================================== */
+:root {
+  /* Background */
+  --bg: #0b0e14;
+  --bg-2: #0f1320;
+
+  /* Primary — Blush Frost */
+  --primary: #f0d1e5;
+  --primary-10: rgba(240, 209, 229, 0.10);
+  --primary-20: rgba(240, 209, 229, 0.20);
+  --primary-40: rgba(240, 209, 229, 0.40);
+
+  /* Secondary — Ghost Green */
+  --secondary: #3df24b;
+  --secondary-10: rgba(61, 242, 75, 0.10);
+  --secondary-20: rgba(61, 242, 75, 0.20);
+  --secondary-glow: rgba(61, 242, 75, 0.55);
+
+  /* Text */
+  --text-primary: #f4f1ee;
+  --text-secondary: #c4c2c0;
+  --text-muted: #8a8886;
+
+  /* Glass */
+  --glass-bg: rgba(255, 255, 255, 0.025);
+  --glass-bg-strong: rgba(255, 255, 255, 0.04);
+  --glass-bg-light: rgba(255, 255, 255, 0.015);
+  --glass-border: 1px solid rgba(255, 255, 255, 0.08);
+  --glass-border-top: rgba(255, 255, 255, 0.16);
+  --glass-blur: 20px;
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.40);
+  --glass-inner-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+
+  /* Radius */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+
+  /* Motion */
+  --duration-base: 240ms;
+  --ease-glass: cubic-bezier(0.4, 0, 0.2, 1);
+}

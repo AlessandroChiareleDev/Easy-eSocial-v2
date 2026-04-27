@@ -81,11 +81,11 @@ Easy-Social-V2/
 
 ## Princípios visuais
 
-| Token       | Cor       | Papel                                                        |
-| ----------- | --------- | ------------------------------------------------------------ |
-| Deep Ink    | `#0B0E14` | O vazio que faz o vidro existir                              |
-| Ghost Green | `#3DF24B` | **LUZ**, nunca tinta sólida (text-shadow / drop-shadow)      |
-| Blush Frost | `#F0D1E5` | Contraste elegante (luz batendo no vidro / borda topo card)  |
+| Token       | Cor       | Papel                                                       |
+| ----------- | --------- | ----------------------------------------------------------- |
+| Deep Ink    | `#0B0E14` | O vazio que faz o vidro existir                             |
+| Ghost Green | `#3DF24B` | **LUZ**, nunca tinta sólida (text-shadow / drop-shadow)     |
+| Blush Frost | `#F0D1E5` | Contraste elegante (luz batendo no vidro / borda topo card) |
 
 Helpers globais em `src/styles/main.css`:
 

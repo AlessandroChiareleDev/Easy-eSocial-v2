@@ -5,7 +5,5 @@
   "files.eol": "\n",
   "typescript.tsdk": "node_modules/typescript/lib",
   "typescript.enablePromptUseWorkspaceTsdk": true,
-  "tailwindCSS.experimental.classRegex": [
-    ["class:\\s*?[\"'`]([^\"'`]*).*?,"]
-  ]
+  "tailwindCSS.experimental.classRegex": [["class:\\s*?[\"'`]([^\"'`]*).*?,"]]
 }

@@ -14,14 +14,14 @@
 
   /* Primary — Blush Frost */
   --primary: #f0d1e5;
-  --primary-10: rgba(240, 209, 229, 0.10);
-  --primary-20: rgba(240, 209, 229, 0.20);
-  --primary-40: rgba(240, 209, 229, 0.40);
+  --primary-10: rgba(240, 209, 229, 0.1);
+  --primary-20: rgba(240, 209, 229, 0.2);
+  --primary-40: rgba(240, 209, 229, 0.4);
 
   /* Secondary — Ghost Green */
   --secondary: #3df24b;
-  --secondary-10: rgba(61, 242, 75, 0.10);
-  --secondary-20: rgba(61, 242, 75, 0.20);
+  --secondary-10: rgba(61, 242, 75, 0.1);
+  --secondary-20: rgba(61, 242, 75, 0.2);
   --secondary-glow: rgba(61, 242, 75, 0.55);
 
   /* Text */
@@ -36,7 +36,7 @@
   --glass-border: 1px solid rgba(255, 255, 255, 0.08);
   --glass-border-top: rgba(255, 255, 255, 0.16);
   --glass-blur: 20px;
-  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.40);
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   --glass-inner-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 
   /* Radius */

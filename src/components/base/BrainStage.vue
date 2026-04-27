@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import brainFull from '@/assets/brain/brain-full.png';
+import brainFull from "@/assets/brain/brain-full.png";
 </script>
 
 <template>
@@ -8,6 +8,117 @@ import brainFull from '@/assets/brain/brain-full.png';
     <div class="ring r2" aria-hidden="true"></div>
     <div class="ring r3" aria-hidden="true"></div>
     <img class="brain-img" :src="brainFull" alt="Cérebro Operacional" />
+
+    <!-- Bolinhas verdes percorrendo SOMENTE os sulcos reais já desenhados na imagem.
+         viewBox = dimensões nativas do PNG (1536x1024) e o SVG é posicionado/dimensionado
+         exatamente igual ao <img>, então as coordenadas são pixels da imagem. -->
+    <svg
+      class="brain-trails"
+      viewBox="0 0 1536 1024"
+      preserveAspectRatio="xMidYMid meet"
+      aria-hidden="true"
+    >
+      <defs>
+        <radialGradient id="bt-dot" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#ffffff" stop-opacity="1" />
+          <stop offset="35%" stop-color="#3df24b" stop-opacity="1" />
+          <stop offset="100%" stop-color="#3df24b" stop-opacity="0" />
+        </radialGradient>
+
+        <!-- Fissura central (vertical, divide os hemisférios) -->
+        <path
+          id="bt-pCenter"
+          d="M 770 175 C 768 350, 770 520, 772 700 C 773 770, 776 800, 778 820"
+        />
+
+        <!-- HEMISFÉRIO ESQUERDO -->
+        <!-- Sulco superior em forma de "C" aberto à direita (parte de cima do lobo frontal esq.) -->
+        <path
+          id="bt-pL1"
+          d="M 560 260 C 595 215, 700 210, 720 280 C 735 350, 660 380, 590 380 C 555 380, 560 410, 595 430"
+        />
+        <!-- Pequena curva intermediária esquerda -->
+        <path id="bt-pL2" d="M 555 460 C 605 440, 685 445, 720 470" />
+        <!-- Lobo inferior esquerdo (horseshoe abrindo pra cima) -->
+        <path
+          id="bt-pL3"
+          d="M 510 740 C 530 620, 620 560, 720 600 C 750 680, 720 760, 640 770 C 580 775, 530 770, 510 740"
+        />
+
+        <!-- HEMISFÉRIO DIREITO (espelho) -->
+        <path
+          id="bt-pR1"
+          d="M 990 260 C 955 215, 850 210, 830 280 C 815 350, 890 380, 960 380 C 995 380, 990 410, 955 430"
+        />
+        <path id="bt-pR2" d="M 995 460 C 945 440, 865 445, 830 470" />
+        <path
+          id="bt-pR3"
+          d="M 1040 740 C 1020 620, 930 560, 830 600 C 800 680, 830 760, 910 770 C 970 775, 1020 770, 1040 740"
+        />
+      </defs>
+
+      <!-- BOLINHAS (sem stroke nas paths — somente os pontos andando) -->
+      <!-- Fissura central -->
+      <circle r="14" fill="url(#bt-dot)">
+        <animateMotion dur="6s" repeatCount="indefinite">
+          <mpath href="#bt-pCenter" />
+        </animateMotion>
+      </circle>
+
+      <!-- Esquerda -->
+      <circle r="14" fill="url(#bt-dot)">
+        <animateMotion dur="7s" repeatCount="indefinite">
+          <mpath href="#bt-pL1" />
+        </animateMotion>
+      </circle>
+      <circle r="14" fill="url(#bt-dot)">
+        <animateMotion dur="7s" repeatCount="indefinite" begin="-3.5s">
+          <mpath href="#bt-pL1" />
+        </animateMotion>
+      </circle>
+      <circle r="12" fill="url(#bt-dot)">
+        <animateMotion dur="4s" repeatCount="indefinite">
+          <mpath href="#bt-pL2" />
+        </animateMotion>
+      </circle>
+      <circle r="14" fill="url(#bt-dot)">
+        <animateMotion dur="9s" repeatCount="indefinite">
+          <mpath href="#bt-pL3" />
+        </animateMotion>
+      </circle>
+      <circle r="14" fill="url(#bt-dot)">
+        <animateMotion dur="9s" repeatCount="indefinite" begin="-4.5s">
+          <mpath href="#bt-pL3" />
+        </animateMotion>
+      </circle>
+
+      <!-- Direita -->
+      <circle r="14" fill="url(#bt-dot)">
+        <animateMotion dur="7s" repeatCount="indefinite" begin="-1.5s">
+          <mpath href="#bt-pR1" />
+        </animateMotion>
+      </circle>
+      <circle r="14" fill="url(#bt-dot)">
+        <animateMotion dur="7s" repeatCount="indefinite" begin="-5s">
+          <mpath href="#bt-pR1" />
+        </animateMotion>
+      </circle>
+      <circle r="12" fill="url(#bt-dot)">
+        <animateMotion dur="4s" repeatCount="indefinite" begin="-2s">
+          <mpath href="#bt-pR2" />
+        </animateMotion>
+      </circle>
+      <circle r="14" fill="url(#bt-dot)">
+        <animateMotion dur="9s" repeatCount="indefinite" begin="-2s">
+          <mpath href="#bt-pR3" />
+        </animateMotion>
+      </circle>
+      <circle r="14" fill="url(#bt-dot)">
+        <animateMotion dur="9s" repeatCount="indefinite" begin="-6.5s">
+          <mpath href="#bt-pR3" />
+        </animateMotion>
+      </circle>
+    </svg>
   </div>
 </template>
 
@@ -22,7 +133,7 @@ import brainFull from '@/assets/brain/brain-full.png';
 
 /* Aura "luz traseira" — núcleo quase branco, bordas neon, some */
 .brain-stage::before {
-  content: '';
+  content: "";
   position: absolute;
   inset: -90px;
   background: radial-gradient(
@@ -40,7 +151,7 @@ import brainFull from '@/assets/brain/brain-full.png';
 
 /* Toque Blush Frost lateral — luz contrária */
 .brain-stage::after {
-  content: '';
+  content: "";
   position: absolute;
   top: 40%;
   left: -10%;
@@ -132,6 +243,34 @@ import brainFull from '@/assets/brain/brain-full.png';
   100% {
     opacity: 0;
     transform: translate(-50%, -50%) scale(1.6);
+  }
+}
+
+/* Bolinhas verdes percorrendo APENAS os sulcos reais já desenhados na imagem.
+   Overlay tem EXATAMENTE as mesmas dimensões e posição do <img> (320px × 213.33px,
+   centralizado no stage), então as coords do viewBox 1536x1024 batem com o pixel real. */
+.brain-trails {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 320px;
+  height: calc(320px * 1024 / 1536); /* 213.33px — match brain-img aspect */
+  pointer-events: none;
+  z-index: 2;
+  overflow: visible;
+  filter: drop-shadow(0 0 3px rgba(61, 242, 75, 1))
+    drop-shadow(0 0 8px rgba(61, 242, 75, 0.7))
+    drop-shadow(0 0 18px rgba(61, 242, 75, 0.35));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brain-trails animateMotion {
+    /* SVG não suporta CSS pra parar animateMotion universalmente,
+       mas modernos respeitam quando desligamos via display do parent */
+  }
+  .brain-trails {
+    display: none;
   }
 }
 </style>

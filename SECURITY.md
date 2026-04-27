@@ -24,14 +24,14 @@ os erros do V1.
 
 ## Certificado A1 (eSocial)
 
-| Regra                                                | Por quê                                                                |
-| ---------------------------------------------------- | ---------------------------------------------------------------------- |
+| Regra                                                | Por quê                                                                 |
+| ---------------------------------------------------- | ----------------------------------------------------------------------- |
 | ⛔ **NUNCA** trafega pelo frontend                   | Se vazar via XSS/CSP fraca, atacante pode emitir eventos como a empresa |
-| ⛔ **NUNCA** commitado no git                        | Repos privados ainda podem ser clonados/forkados/leakados              |
-| 🔒 Path do A1 sempre em variável de ambiente backend | Não hardcode                                                           |
+| ⛔ **NUNCA** commitado no git                        | Repos privados ainda podem ser clonados/forkados/leakados               |
+| 🔒 Path do A1 sempre em variável de ambiente backend | Não hardcode                                                            |
 | 🔒 Permissões `0400` no servidor                     | Apenas o usuário do app lê                                              |
-| 🔒 Senha do A1 em secret manager (não em `.env`)     | Vault, AWS Secrets Manager, ou similar                                 |
-| 🔒 **Nunca logar** conteúdo do A1                    | Logs vazam mais que código                                             |
+| 🔒 Senha do A1 em secret manager (não em `.env`)     | Vault, AWS Secrets Manager, ou similar                                  |
+| 🔒 **Nunca logar** conteúdo do A1                    | Logs vazam mais que código                                              |
 
 ## Repo (GitHub)
 

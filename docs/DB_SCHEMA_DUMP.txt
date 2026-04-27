@@ -1,0 +1,290 @@
+﻿
+### public.s1210_cpf_scope  (93,833 rows)
+  id                               bigint NOT NULL DEFAULT nextval('s1210_cpf_scope_id_seq'::regclass)
+  xlsx_id                          bigint NOT NULL
+  empresa_id                       integer NOT NULL
+  per_apur                         character varying(7) NOT NULL
+  cpf                              character(11) NOT NULL
+  nome                             character varying(255)
+  matricula                        character varying(50)
+  lote_num                         smallint NOT NULL
+  row_number                       integer
+  raw_row                          jsonb
+  created_at                       timestamp with time zone NOT NULL DEFAULT now()
+
+### public.s1210_cpf_envios  (170,230 rows)
+  id                               bigint NOT NULL DEFAULT nextval('s1210_cpf_envios_id_seq'::regclass)
+  empresa_id                       integer NOT NULL
+  per_apur                         character varying(7) NOT NULL
+  cpf                              character(11) NOT NULL
+  lote_num                         smallint NOT NULL
+  status                           character varying(20) NOT NULL
+  nr_recibo_usado                  character varying(50)
+  nr_recibo_novo                   character varying(50)
+  protocolo                        character varying(100)
+  codigo_resposta                  character varying(10)
+  descricao_resposta               text
+  erro_descricao                   text
+  xml_enviado                      text
+  xml_resposta                     text
+  pagamentos                       jsonb
+  info_ir                          jsonb
+  enviado_por                      integer
+  enviado_em                       timestamp with time zone NOT NULL DEFAULT now()
+  duracao_ms                       integer
+
+### public.s1210_cpf_blocklist  (4 rows)
+  id                               bigint NOT NULL DEFAULT nextval('s1210_cpf_blocklist_id_seq'::regclass)
+  empresa_id                       integer NOT NULL
+  cpf                              character varying(11) NOT NULL
+  per_apur                         character varying(7)
+  lote_num                         integer
+  motivo                           text
+  created_at                       timestamp with time zone NOT NULL DEFAULT now()
+
+### public.s1210_cpf_recibo  (0 rows)
+  id                               bigint NOT NULL DEFAULT nextval('s1210_cpf_recibo_id_seq'::regclass)
+  empresa_id                       integer NOT NULL
+  per_apur                         character varying(7) NOT NULL
+  cpf                              character(11) NOT NULL
+  nr_recibo_zip                    character varying(50)
+  nr_recibo_usado                  character varying(50)
+  nr_recibo_esocial                character varying(50)
+  ide_dm_dev                       character varying(100)
+  dh_processamento_zip             timestamp with time zone
+  fonte                            character varying(30) NOT NULL DEFAULT 'zip'::character varying
+  atualizado_em                    timestamp with time zone NOT NULL DEFAULT now()
+
+### public.s1210_lote1_codfunc_scope  (30,435 rows)
+  id                               bigint NOT NULL DEFAULT nextval('s1210_lote1_codfunc_scope_id_seq'::regclass)
+  empresa_id                       integer NOT NULL
+  per_apur                         character varying(7) NOT NULL
+  codigo_empresa                   character varying(32)
+  codigo_lote                      character varying(64)
+  codigo_filial                    character varying(64)
+  codigo_funcionario               character varying(64) NOT NULL
+  concatenar                       character varying(128)
+  lote_label                       character varying(64)
+  source_filename                  character varying(255)
+  source_sha256                    character varying(64)
+  created_at                       timestamp with time zone DEFAULT now()
+  cpf                              character varying(11)
+
+### public.s1210_operadoras  (7,190 rows)
+  id                               bigint NOT NULL DEFAULT nextval('s1210_operadoras_id_seq'::regclass)
+  xlsx_id                          bigint
+  empresa_id                       integer NOT NULL
+  per_apur                         character varying(7) NOT NULL
+  cpf                              character(11) NOT NULL
+  rubrica_origem                   character varying(10) NOT NULL
+  cnpj_operadora                   character varying(14)
+  reg_ans                          character varying(20)
+  nome_operadora                   character varying(255)
+  valor                            numeric
+  raw_row                          jsonb
+  created_at                       timestamp with time zone NOT NULL DEFAULT now()
+  lote_num                         integer
+
+### public.s1210_xlsx  (16 rows)
+  id                               bigint NOT NULL DEFAULT nextval('s1210_xlsx_id_seq'::regclass)
+  empresa_id                       integer NOT NULL
+  per_apur                         character varying(7) NOT NULL
+  nome_arquivo                     character varying(255) NOT NULL
+  tamanho_bytes                    bigint NOT NULL
+  sha256                           character(64) NOT NULL
+  storage_path                     text NOT NULL
+  aba_geral                        character varying(100) NOT NULL
+  aba_operadoras                   character varying(100)
+  uploaded_at                      timestamp with time zone NOT NULL DEFAULT now()
+  uploaded_by                      integer
+  parse_ok                         boolean NOT NULL DEFAULT false
+  parse_erro                       text
+  totais_json                      jsonb
+
+### public.esocial_envios  (244 rows)
+  id                               integer NOT NULL DEFAULT nextval('esocial_envios_id_seq'::regclass)
+  tipo_evento                      character varying(30) NOT NULL DEFAULT 'S-1010'::character varying
+  modo                             character varying(20) NOT NULL DEFAULT 'alteracao'::character varying
+  status                           character varying(30) NOT NULL DEFAULT 'enviado'::character varying
+  protocolo_envio                  character varying(100)
+  codigo_resposta                  character varying(10)
+  descricao_resposta               text
+  total_eventos                    integer DEFAULT 0
+  rubrica_ids                      jsonb
+  xml_retorno                      text
+  ocorrencias                      jsonb
+  created_at                       timestamp with time zone DEFAULT now()
+  updated_at                       timestamp with time zone DEFAULT now()
+  ambiente                         character varying(2) NOT NULL DEFAULT '2'::character varying
+  ini_valid                        character varying(10)
+  rubrica_detalhes                 jsonb
+  xml_enviado                      text
+  recibo_consulta                  jsonb
+  nr_recibo                        character varying(100)
+
+### public.esocial_depara  (2,381 rows)
+  id                               integer NOT NULL DEFAULT nextval('esocial_depara_id_seq'::regclass)
+  cod_rubrica                      text NOT NULL
+  campo                            text NOT NULL
+  valor_anterior                   text
+  valor_novo                       text NOT NULL
+  nome_rubrica                     text
+  regra                            text DEFAULT 'manual'::text
+  status                           character varying(20) DEFAULT 'pendente'::character varying
+  created_at                       timestamp with time zone DEFAULT now()
+  aplicado_em                      timestamp with time zone
+
+### public.pipeline_cpf_results  (113,025 rows)
+  id                               integer NOT NULL DEFAULT nextval('pipeline_cpf_results_id_seq'::regclass)
+  run_id                           integer NOT NULL
+  cpf                              character varying(11) NOT NULL
+  status                           character varying(20) NOT NULL DEFAULT 'pendente'::character varying
+  nr_recibo_original               character varying(100)
+  nr_recibo_novo                   character varying(100)
+  pagamentos                       jsonb
+  info_ir_cr                       jsonb
+  erro_descricao                   text
+  lote_num                         integer
+  processed_at                     timestamp with time zone
+
+### public.pipeline_snapshots  (186,050 rows)
+  id                               integer NOT NULL DEFAULT nextval('pipeline_snapshots_id_seq'::regclass)
+  run_id                           integer
+  per_apur                         character varying(7) NOT NULL
+  tipo                             character varying(10) NOT NULL
+  cpf                              character varying(11) NOT NULL
+  dados_s5002                      jsonb
+  nr_recibo_s5002                  character varying(40)
+  captured_at                      timestamp with time zone DEFAULT now()
+
+### public.pipeline_runs  (29 rows)
+  id                               integer NOT NULL DEFAULT nextval('pipeline_runs_id_seq'::regclass)
+  per_apur                         character varying(7) NOT NULL
+  status                           character varying(20) NOT NULL DEFAULT 'preparando'::character varying
+  total_cpfs                       integer DEFAULT 0
+  cpfs_ok                          integer DEFAULT 0
+  cpfs_erro                        integer DEFAULT 0
+  cpfs_ignorados                   integer DEFAULT 0
+  s1298_done                       boolean DEFAULT false
+  s1298_recibo                     character varying(100)
+  s1299_done                       boolean DEFAULT false
+  s1299_recibo                     character varying(100)
+  lote_atual                       integer DEFAULT 0
+  total_lotes                      integer DEFAULT 0
+  started_at                       timestamp with time zone DEFAULT now()
+  finished_at                      timestamp with time zone
+  erro_fatal                       text
+
+### public.master_empresas  (1 rows)
+  id                               integer NOT NULL DEFAULT nextval('master_empresas_id_seq'::regclass)
+  nome                             character varying(255) NOT NULL
+  cnpj                             character varying(18)
+  db_name                          character varying(100) NOT NULL
+  db_host                          character varying(255) DEFAULT 'localhost'::character varying
+  db_port                          integer DEFAULT 5432
+  ativo                            boolean DEFAULT true
+  criado_em                        timestamp with time zone DEFAULT now()
+
+### public.config_esocial  (1 rows)
+  id                               integer NOT NULL DEFAULT nextval('config_esocial_id_seq'::regclass)
+  cnpj                             character varying(20) NOT NULL
+  ini_valid_padrao                 character varying(10)
+  auto_detected                    boolean DEFAULT false
+  updated_at                       timestamp with time zone DEFAULT now()
+
+
+### VIEW public.v_s1210_contadores
+ WITH ult AS (
+         SELECT DISTINCT ON (s1210_cpf_envios.empresa_id, s1210_cpf_envios.per_apur, s1210_cpf_envios.cpf) s1210_cpf_envios.empresa_id,
+            s1210_cpf_envios.per_apur,
+            s1210_cpf_envios.cpf,
+            s1210_cpf_envios.lote_num,
+            s1210_cpf_envios.status
+           FROM s1210_cpf_envios
+          ORDER BY s1210_cpf_envios.empresa_id, s1210_cpf_envios.per_apur, s1210_cpf_envios.cpf, s1210_cpf_envios.enviado_em DESC
+        )
+ SELECT s.empresa_id,
+    s.per_apur,
+    s.lote_num,
+    count(*) AS total,
+    count(*) FILTER (WHERE u.status::text = 'ok'::text) AS ok,
+    count(*) FILTER (WHERE u.status::text = 'erro'::text) AS erro,
+    count(*) FILTER (WHERE u.status::text = 'enviando'::text) AS enviando,
+    count(*) FILTER (WHERE u.status::text = 'na'::text) AS na,
+    count(*) FILTER (WHERE u.status IS NULL OR (u.status::text <> ALL (ARRAY['ok'::character varying, 'erro'::character varying, 'enviando'::character varying, 'na'::character varying]::text[]))) AS pendente
+   FROM s1210_cpf_scope s
+     LEFT JOIN ult u ON u.empresa_id = s.empresa_id AND u.per_apur::text = s.per_apur::text AND u.cpf = s.cpf
+  GROUP BY s.empresa_id, s.per_apur, s.lote_num;
+
+
+### master_empresas (amostra)
+  {'id': 1, 'nome': 'APPA SERVICOS TEMPORARIOS E EFETIVOS LTDA', 'cnpj': '05.969.071/0001-10', 'db_name': 'easy_social_db', 'db_host': 'localhost', 'db_port': 5432, 'ativo': True, 'criado_em': datetime.datetime(2026, 3, 26, 13, 2, 31, 91730, tzinfo=datetime.timezone.utc)}
+
+### Sample 1 row ù s1210_cpf_scope
+  id                               = 1
+  xlsx_id                          = 1
+  empresa_id                       = 1
+  per_apur                         = 2025-02
+  cpf                              = 01853386669
+  nome                             = None
+  matricula                        = None
+  lote_num                         = 1
+  row_number                       = 2
+  raw_row                          = {'c0': '2', 'c1': '202501', 'c2': '1511176', 'c3': '1', 'c4': '219', 'c5': '2|21à
+  created_at                       = 2026-04-21 14:38:42.016927+00:00
+
+### Sample 1 row ù s1210_cpf_envios
+  id                               = 1
+  empresa_id                       = 1
+  per_apur                         = 2025-02
+  cpf                              = 01853386669
+  lote_num                         = 1
+  status                           = ok
+  nr_recibo_usado                  = None
+  nr_recibo_novo                   = 1.1.0000000040108461247
+  protocolo                        = None
+  codigo_resposta                  = None
+  descricao_resposta               = backfill do hist¾rico legado
+  erro_descricao                   = None
+  xml_enviado                      = None
+  xml_resposta                     = None
+  pagamentos                       = None
+  info_ir                          = None
+  enviado_por                      = None
+  enviado_em                       = 2026-04-21 14:49:05.248850+00:00
+  duracao_ms                       = None
+
+### Sample 1 row ù esocial_envios
+  id                               = 59
+  tipo_evento                      = S-1010
+  modo                             = alteracao
+  status                           = processado
+  protocolo_envio                  = 1.1.202604.0000000012998291469
+  codigo_resposta                  = 201
+  descricao_resposta               = Lote Recebido com Sucesso.
+  total_eventos                    = 1
+  rubrica_ids                      = ['249']
+  xml_retorno                      = <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><Consultà
+  ocorrencias                      = []
+  created_at                       = 2026-04-09 14:45:18.783964+00:00
+  updated_at                       = 2026-04-09 14:45:25.709928+00:00
+  ambiente                         = 1
+  ini_valid                        = 2018-02
+  rubrica_detalhes                 = [{'analise': 'Rubrica com inconsistÛncia de IRRF', 'nat_rubr': '6129', 'descricaà
+  xml_enviado                      = <?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://sà
+  recibo_consulta                  = {'eventos': [{'id': 'ID1059690710000002026040914451900001', 'descricao': 'Sucessà
+  nr_recibo                        = 1.1.0000000039806852633
+
+### Sample 1 row ù pipeline_cpf_results
+  id                               = 1613
+  run_id                           = 1
+  cpf                              = 04295273732
+  status                           = ok
+  nr_recibo_original               = 1.1.0000000035299379752
+  nr_recibo_novo                   = 1.1.0000000039841536107
+  pagamentos                       = [{'vrLiq': '2561', 'dtPgto': '2025-09-05', 'perRef': '2025-08', 'tpPgto': '1', 'à
+  info_ir_cr                       = [{'tpCR': '056107', 'vrCR': ''}]
+  erro_descricao                   = None
+  lote_num                         = 6
+  processed_at                     = 2026-04-10 06:23:47.398796+00:00

@@ -801,11 +801,19 @@ onMounted(carregar);
   margin: 0 2px;
 }
 .na-inline {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-muted);
-  font-family: "JetBrains Mono Variable", ui-monospace, monospace;
-  margin-left: 4px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #7cb1ff;
+  background: rgba(56, 109, 199, 0.18);
+  border: 1px solid rgba(124, 177, 255, 0.35);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  letter-spacing: 0.02em;
+  text-shadow: 0 0 8px rgba(124, 177, 255, 0.45);
 }
 .kpi-card.brand .kpi-value {
   color: var(--primary);
@@ -1103,8 +1111,8 @@ onMounted(carregar);
   color: #f59e0b;
 }
 .nums .na {
-  color: var(--primary);
-  opacity: 0.85;
+  color: #7cb1ff;
+  opacity: 1;
 }
 .nums b {
   font-weight: 600;
@@ -1120,7 +1128,8 @@ onMounted(carregar);
   color: #fbbf24;
 }
 .nums .na b {
-  color: var(--primary);
+  color: #a8caff;
+  text-shadow: 0 0 6px rgba(124, 177, 255, 0.45);
 }
 
 .hint {

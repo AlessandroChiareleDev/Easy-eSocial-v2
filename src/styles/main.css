@@ -80,34 +80,4 @@ body {
   );
 }
 
-.blush-aura {
-  position: fixed;
-  top: -180px;
-  left: -180px;
-  width: 620px;
-  height: 620px;
-  border-radius: 50%;
-  background: radial-gradient(
-    circle,
-    rgba(240, 209, 229, 0.18) 0%,
-    rgba(240, 209, 229, 0.06) 40%,
-    transparent 72%
-  );
-  filter: blur(80px);
-  pointer-events: none;
-  z-index: 0;
-}
-.blush-aura--secondary {
-  top: auto;
-  left: auto;
-  bottom: -220px;
-  right: -160px;
-  width: 540px;
-  height: 540px;
-  background: radial-gradient(
-    circle,
-    rgba(61, 242, 75, 0.1) 0%,
-    rgba(61, 242, 75, 0.04) 45%,
-    transparent 75%
-  );
-}
+.blush-aura, .blush-aura--secondary { display: none !important; }

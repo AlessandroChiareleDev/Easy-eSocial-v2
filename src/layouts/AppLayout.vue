@@ -36,8 +36,6 @@ function logout() {
 
 <template>
   <AppBackground />
-  <div class="blush-aura" aria-hidden="true"></div>
-  <div class="blush-aura blush-aura--secondary" aria-hidden="true"></div>
 
   <div class="shell">
     <header class="topbar">
@@ -128,42 +126,15 @@ function logout() {
 .brand-mark::before {
   content: "";
   position: absolute;
-  inset: -25%;
+  inset: 0;
   border-radius: inherit;
   background: radial-gradient(
-    ellipse 38% 32% at 25% 25%,
-    rgba(255, 255, 255, 1) 0%,
-    rgba(255, 240, 248, 0.85) 25%,
-    rgba(255, 220, 240, 0.4) 55%,
-    transparent 75%
+    ellipse 60% 50% at 30% 25%,
+    rgba(255, 255, 255, 0.55) 0%,
+    transparent 70%
   );
   pointer-events: none;
   z-index: 1;
-  animation:
-    brand-orbit 9s linear infinite,
-    brand-pulse 2.4s ease-in-out infinite;
-}
-@keyframes brand-orbit {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-@keyframes brand-pulse {
-  0%,
-  100% {
-    opacity: 0.82;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .brand-mark::before {
-    animation: none;
-  }
 }
 .brand-mark::after {
   content: "es";

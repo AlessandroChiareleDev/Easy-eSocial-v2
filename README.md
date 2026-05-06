@@ -27,6 +27,30 @@ um redesign do zero focado em:
    - Logs de Sistema
    - Problemas
 
+## Roadmap — Explorador de Arquivos (FUTURO, não construir agora)
+
+Tela nova que vai ler **tudo** que entrar pela importação de XMLs (a tabela
+`explorador_eventos` já guarda hoje S-1200, S-1210, S-2200, S-2299, S-5001,
+S-5002, S-5003, S-3000 etc — só falta UI).
+
+Conceito:
+
+- **Visão por CPF/funcionário**, não por evento isolado.
+- **Chain walk de eventos**: linha do tempo anual onde os eventos se amarram
+  uns nos outros (ex.: S-2200 admissão → S-1200 mensais → S-1210 pagamentos →
+  S-5001/5002/5003 totalizadores → S-2299 desligamento). O usuário navega
+  visualmente o histórico do trabalhador.
+- **XMLs baixáveis**: cada nó da linha do tempo permite baixar o XML original
+  daquele evento. Os XMLs ficam guardados **mega compactados** em storage
+  (não inflar o banco).
+- **UX futurista**: visualização tipo grafo/timeline, não tabela.
+
+Pendente decidir: formato de compactação (zstd? brotli? tar.zst por CPF?),
+storage (filesystem local vs S3-compatible), e como amarrar eventos
+relacionados (chave por `id_evento` + referências cruzadas no payload).
+
+> **Não começar a construir esta tela ainda.** Está aqui só pra não esquecer.
+
 ## Setup
 
 ```powershell

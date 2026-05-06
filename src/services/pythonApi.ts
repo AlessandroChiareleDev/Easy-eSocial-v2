@@ -3,9 +3,15 @@
  * TUDO de eSocial S-1010/S-1210 mora aqui.
  *
  * Proxy via Vite: /py-api/* → http://localhost:8000/*
+ *
+ * Multi-tenant: injeta automaticamente ?empresa_id=<id-selecionado>
+ * em todo request, lendo do empresa store. Excecao: rotas em SKIP_TENANT
+ * (ex.: /api/empresas que precisa rodar antes de existir selecao).
  */
 
 const PY_BASE = "/py-api";
+
+const SKIP_TENANT = ["/api/empresas"];
 
 export interface PyApiError extends Error {
   status: number;
@@ -15,6 +21,8 @@ export interface PyApiError extends Error {
 interface PyOptions {
   query?: Record<string, string | number | boolean | undefined | null>;
   signal?: AbortSignal;
+  /** Pula injecao automatica de empresa_id (default false). */
+  skipTenant?: boolean;
 }
 
 function buildQuery(q?: PyOptions["query"]): string {
@@ -32,12 +40,27 @@ async function pyGet<T = unknown>(
   path: string,
   opts: PyOptions = {},
 ): Promise<T> {
+  // Injeta empresa_id se aplicavel
+  const skip =
+    opts.skipTenant ||
+    SKIP_TENANT.some((p) => path === p || path.startsWith(p + "/"));
+  let query = { ...(opts.query ?? {}) };
+  if (!skip && query.empresa_id === undefined) {
+    try {
+      const { useEmpresaStore } = await import("@/stores/empresa");
+      const eid = useEmpresaStore().currentId;
+      if (eid != null) query = { ...query, empresa_id: eid };
+    } catch {
+      /* store nao montada ainda - segue sem */
+    }
+  }
+
   const init: RequestInit = {
     method: "GET",
     headers: { Accept: "application/json" },
   };
   if (opts.signal) init.signal = opts.signal;
-  const res = await fetch(`${PY_BASE}${path}${buildQuery(opts.query)}`, init);
+  const res = await fetch(`${PY_BASE}${path}${buildQuery(query)}`, init);
 
   let body: unknown = null;
   const ct = res.headers.get("content-type") ?? "";

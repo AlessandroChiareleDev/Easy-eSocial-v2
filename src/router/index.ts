@@ -4,11 +4,13 @@ import {
   type RouteRecordRaw,
 } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
+import { useEmpresaStore } from "@/stores/empresa";
 
 /**
  * Easy-Social V2 — rotas
- *  /login  → tela de entrada (pública)
- *  /       → AppLayout (topbar + bg) → 6 views protegidas
+ *  /login    → tela de entrada (pública)
+ *  /empresas → seletor de empresa (auth, sem layout)
+ *  /         → AppLayout (topbar + bg) → views protegidas
  */
 const routes: RouteRecordRaw[] = [
   {
@@ -16,6 +18,12 @@ const routes: RouteRecordRaw[] = [
     name: "login",
     component: () => import("@/views/LoginView.vue"),
     meta: { title: "Entrar", public: true },
+  },
+  {
+    path: "/empresas",
+    name: "empresas",
+    component: () => import("@/views/EmpresaSelectView.vue"),
+    meta: { title: "Escolher empresa", skipEmpresa: true },
   },
   {
     path: "/",
@@ -52,6 +60,13 @@ const routes: RouteRecordRaw[] = [
         meta: { title: "S-1210 Anual" },
       },
       {
+        path: "esocial/s1210-anual/:per_apur/:lote_num",
+        name: "s1210-mes",
+        component: () => import("@/views/S1210MesView.vue"),
+        meta: { title: "S-1210 — CPFs do mês" },
+        props: true,
+      },
+      {
         path: "logs",
         name: "logs",
         component: () => import("@/views/LogsView.vue"),
@@ -79,6 +94,13 @@ router.beforeEach((to) => {
   }
   if (to.name === "login" && auth.isAuthenticated) {
     return { path: "/" };
+  }
+  // Multi-tenant: depois do login precisa escolher empresa
+  if (auth.isAuthenticated && !to.meta?.public && !to.meta?.skipEmpresa) {
+    const emp = useEmpresaStore();
+    if (!emp.hasSelected) {
+      return { name: "empresas", query: { redirect: to.fullPath } };
+    }
   }
 });
 

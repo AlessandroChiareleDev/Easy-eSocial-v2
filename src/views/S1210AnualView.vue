@@ -35,9 +35,20 @@ interface OverviewAnual {
   meses: MesLinha[];
 }
 
+interface Empresa {
+  id: number;
+  nome: string;
+  cnpj: string | null;
+  ativo: boolean;
+}
+
+import { useEmpresaStore } from "@/stores/empresa";
+
 const router = useRouter();
+const empresaStore = useEmpresaStore();
 const ano = ref<number>(2025);
-const empresaId = ref<number>(1);
+const empresaId = computed<number>(() => empresaStore.currentId ?? 1);
+const empresas = ref<Empresa[]>([]);
 const overview = ref<OverviewAnual | null>(null);
 const loading = ref(true);
 const error = ref<string | null>(null);
@@ -154,13 +165,97 @@ function fmt(n: number | null | undefined): string {
 
 function abrirCelula(c: Celula) {
   if (c.estado === "sem_dados") return;
-  // drill-down futuro — por enquanto só log, rota será criada quando endpoint estiver pronto
-  // eslint-disable-next-line no-console
-  console.log("[S-1210] drill-down", {
-    per_apur: c.per_apur,
-    lote_num: c.lote_num,
-    estado: c.estado,
+  router.push({
+    name: "s1210-mes",
+    params: { per_apur: c.per_apur, lote_num: String(c.lote_num) },
   });
+}
+
+// APPA (id=1) usa 4 lotes fixos; demais (Solucoes em diante) usam lotes dinamicos.
+const APPA_ID = 1;
+const empresaUsaLotesDinamicos = computed(() => empresaId.value !== APPA_ID);
+
+const maxLotes = computed(() => {
+  if (!empresaUsaLotesDinamicos.value) return 4;
+  if (!overview.value) return 1;
+  let m = 1;
+  for (const mes of overview.value.meses) {
+    if (mes.lotes.length > m) m = mes.lotes.length;
+  }
+  return m;
+});
+
+const headersLotes = computed<number[]>(() => {
+  const out: number[] = [];
+  for (let i = 1; i <= maxLotes.value; i++) out.push(i);
+  return out;
+});
+
+const gridStyle = computed(() => {
+  // 140px (mes) + N colunas de lote + (acoes 90px se dinamico)
+  const cols = `140px repeat(${maxLotes.value}, 1fr)${
+    empresaUsaLotesDinamicos.value ? " 90px" : ""
+  }`;
+  return { gridTemplateColumns: cols };
+});
+
+function celulaDoLote(mes: MesLinha, lote_num: number): Celula | null {
+  return mes.lotes.find((c) => c.lote_num === lote_num) ?? null;
+}
+
+async function dividirLote(mes: MesLinha) {
+  if (!empresaUsaLotesDinamicos.value) return;
+  if (mes.lotes.length >= 2) return;
+  const ok = window.confirm(
+    `Dividir o lote 1 de ${labelMes(mes.per_apur).label} em 2 lotes iguais?`,
+  );
+  if (!ok) return;
+  try {
+    await fetch(
+      `/py-api/api/s1210-repo/anual/dividir-lote?empresa_id=${empresaId.value}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          per_apur: mes.per_apur,
+          lote_origem: 1,
+          lote_destino: 2,
+        }),
+      },
+    );
+    await carregar();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "Falha ao dividir lote";
+  }
+}
+
+async function unirLotes(mes: MesLinha) {
+  if (!empresaUsaLotesDinamicos.value) return;
+  if (mes.lotes.length < 2) return;
+  const ok = window.confirm(
+    `Unir os ${mes.lotes.length} lotes de ${labelMes(mes.per_apur).label} em um único lote?`,
+  );
+  if (!ok) return;
+  try {
+    // Move lote N..2 -> 1 (do maior pro menor)
+    for (let n = mes.lotes.length; n >= 2; n--) {
+      await fetch(
+        `/py-api/api/s1210-repo/anual/unir-lotes?empresa_id=${empresaId.value}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            per_apur: mes.per_apur,
+            lote_origem: n,
+            lote_destino: 1,
+          }),
+        },
+      );
+    }
+    await carregar();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "Falha ao unir lotes";
+  }
 }
 
 function processarLotes() {
@@ -196,7 +291,9 @@ async function carregar() {
 }
 
 watch([ano, empresaId], carregar);
-onMounted(carregar);
+onMounted(() => {
+  void carregar();
+});
 </script>
 
 <template>
@@ -360,12 +457,12 @@ onMounted(carregar);
         </div>
       </header>
 
-      <div class="grid-table">
+      <div class="grid-table" :style="gridStyle">
         <div class="grid-th grid-th-mes">Mês</div>
-        <div class="grid-th">Lote 1</div>
-        <div class="grid-th">Lote 2</div>
-        <div class="grid-th">Lote 3</div>
-        <div class="grid-th">Lote 4</div>
+        <div v-for="n in headersLotes" :key="`th-${n}`" class="grid-th">
+          Lote {{ n }}
+        </div>
+        <div v-if="empresaUsaLotesDinamicos" class="grid-th">Ações</div>
 
         <div v-for="mes in overview.meses" :key="mes.per_apur" class="grid-row">
           <div class="cell-mes">
@@ -382,41 +479,80 @@ onMounted(carregar);
             </div>
           </div>
 
-          <button
-            v-for="celula in mes.lotes"
-            :key="`${celula.per_apur}-${celula.lote_num}`"
-            class="cell"
-            :class="{ 'cell-empty': celula.estado === 'sem_dados' }"
-            :disabled="celula.estado === 'sem_dados'"
-            :title="`${labelStatus(celula.estado)}`"
-            @click="abrirCelula(celula)"
-          >
-            <span :class="classeStatus(celula.estado)">
-              {{ labelStatus(celula.estado) }}
-            </span>
+          <template v-for="n in headersLotes" :key="`${mes.per_apur}-${n}`">
+            <button
+              v-if="celulaDoLote(mes, n)"
+              class="cell"
+              :class="{
+                'cell-empty': celulaDoLote(mes, n)!.estado === 'sem_dados',
+              }"
+              :disabled="celulaDoLote(mes, n)!.estado === 'sem_dados'"
+              :title="labelStatus(celulaDoLote(mes, n)!.estado)"
+              @click="abrirCelula(celulaDoLote(mes, n)!)"
+            >
+              <span :class="classeStatus(celulaDoLote(mes, n)!.estado)">
+                {{ labelStatus(celulaDoLote(mes, n)!.estado) }}
+              </span>
+              <div
+                v-if="celulaDoLote(mes, n)!.estado !== 'sem_dados'"
+                class="nums"
+              >
+                <span
+                  ><b>{{ fmt(celulaDoLote(mes, n)!.total) }}</b> escopo</span
+                >
+                <span class="ok"
+                  ><b>{{ fmt(celulaDoLote(mes, n)!.ok) }}</b> ok</span
+                >
+                <span v-if="celulaDoLote(mes, n)!.erro > 0" class="err"
+                  ><b>{{ fmt(celulaDoLote(mes, n)!.erro) }}</b> erro</span
+                >
+                <span
+                  v-if="
+                    celulaDoLote(mes, n)!.pendente +
+                      celulaDoLote(mes, n)!.enviando >
+                    0
+                  "
+                  class="pend"
+                  ><b>{{
+                    fmt(
+                      celulaDoLote(mes, n)!.pendente +
+                        celulaDoLote(mes, n)!.enviando,
+                    )
+                  }}</b>
+                  pend</span
+                >
+                <span v-if="(celulaDoLote(mes, n)!.na ?? 0) > 0" class="na"
+                  ><b>{{ fmt(celulaDoLote(mes, n)!.na) }}</b> N/A</span
+                >
+              </div>
+              <div
+                v-if="celulaDoLote(mes, n)!.estado === 'aguardando_mapeamento'"
+                class="hint"
+              >
+                Clique para ver lista com identificador temporário
+              </div>
+            </button>
+            <div v-else class="cell cell-vazio" />
+          </template>
 
-            <div v-if="celula.estado !== 'sem_dados'" class="nums">
-              <span
-                ><b>{{ fmt(celula.total) }}</b> escopo</span
-              >
-              <span class="ok"
-                ><b>{{ fmt(celula.ok) }}</b> ok</span
-              >
-              <span v-if="celula.erro > 0" class="err"
-                ><b>{{ fmt(celula.erro) }}</b> erro</span
-              >
-              <span v-if="celula.pendente + celula.enviando > 0" class="pend"
-                ><b>{{ fmt(celula.pendente + celula.enviando) }}</b> pend</span
-              >
-              <span v-if="(celula.na ?? 0) > 0" class="na"
-                ><b>{{ fmt(celula.na) }}</b> N/A</span
-              >
-            </div>
-
-            <div v-if="celula.estado === 'aguardando_mapeamento'" class="hint">
-              Clique para ver lista com identificador temporário
-            </div>
-          </button>
+          <div v-if="empresaUsaLotesDinamicos" class="cell cell-acao">
+            <button
+              v-if="mes.lotes.length === 1 && (mes.lotes[0]?.total ?? 0) > 0"
+              class="btn-mini"
+              title="Dividir o lote 1 em 2 lotes iguais"
+              @click="dividirLote(mes)"
+            >
+              + Lote
+            </button>
+            <button
+              v-else-if="mes.lotes.length >= 2"
+              class="btn-mini btn-mini-warn"
+              title="Unir todos os lotes em um único"
+              @click="unirLotes(mes)"
+            >
+              ↩ Unir
+            </button>
+          </div>
         </div>
       </div>
     </section>
@@ -470,7 +606,7 @@ onMounted(carregar);
 }
 .crumb {
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
-  font-size: 10.5px;
+  font-size: 13px;
   color: var(--text-muted);
   letter-spacing: 0.05em;
 }
@@ -492,7 +628,7 @@ onMounted(carregar);
   border: 1px solid rgba(61, 242, 75, 0.28);
   border-radius: 100px;
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
-  font-size: 10px;
+  font-size: 13px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--secondary);
@@ -547,7 +683,7 @@ onMounted(carregar);
 }
 .year-btn {
   padding: 6px 14px;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
   border-radius: 100px;
@@ -572,6 +708,28 @@ onMounted(carregar);
   display: flex;
   gap: 8px;
   align-items: center;
+}
+.empresa-select {
+  height: 36px;
+  padding: 0 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  color: var(--text-primary, #fff);
+  font: inherit;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  max-width: 280px;
+  transition: all 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.empresa-select:hover:not(:disabled) {
+  background: rgba(240, 209, 229, 0.08);
+  border-color: rgba(240, 209, 229, 0.25);
+}
+.empresa-select:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 .icon-btn {
   width: 36px;
@@ -614,7 +772,7 @@ onMounted(carregar);
   );
   color: #d4ffd9;
   font-weight: 600;
-  font-size: 13px;
+  font-size: 14px;
   letter-spacing: -0.01em;
   border-radius: 14px;
   border: 1px solid rgba(61, 242, 75, 0.55);
@@ -658,10 +816,10 @@ onMounted(carregar);
 }
 .page-header h1 .accent {
   color: var(--primary);
-  text-shadow: 0 0 12px rgba(240, 209, 229, 0.5);
+  text-shadow: 0 0 6px rgba(255, 255, 255, 0.08);
 }
 .page-header p {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-secondary);
   margin: 4px 0 0;
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
@@ -692,7 +850,7 @@ onMounted(carregar);
   backdrop-filter: blur(28px) saturate(140%);
   -webkit-backdrop-filter: blur(28px) saturate(140%);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-secondary);
 }
 .state-err {
@@ -712,7 +870,7 @@ onMounted(carregar);
   padding: 4px 8px;
   border-radius: 6px;
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-secondary);
   display: inline-block;
 }
@@ -781,7 +939,7 @@ onMounted(carregar);
 }
 .kpi-label {
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
-  font-size: 9.5px;
+  font-size: 13px;
   color: var(--text-muted);
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -817,25 +975,23 @@ onMounted(carregar);
 }
 .kpi-card.brand .kpi-value {
   color: var(--primary);
-  text-shadow: 0 0 14px rgba(240, 209, 229, 0.4);
+  text-shadow: 0 0 6px rgba(255, 255, 255, 0.08);
 }
 .kpi-card.ok .kpi-value {
   color: var(--secondary);
-  text-shadow:
-    0 0 16px rgba(61, 242, 75, 0.55),
-    0 0 28px rgba(61, 242, 75, 0.35);
+  text-shadow: 0 0 6px rgba(255, 255, 255, 0.08);
 }
 .kpi-card.err .kpi-value {
   color: #ff6a7d;
-  text-shadow: 0 0 12px rgba(255, 90, 110, 0.5);
+  text-shadow: 0 0 6px rgba(255, 255, 255, 0.08);
 }
 .kpi-card.pend .kpi-value {
   color: #f59e0b;
-  text-shadow: 0 0 12px rgba(245, 158, 11, 0.45);
+  text-shadow: 0 0 6px rgba(255, 255, 255, 0.08);
 }
 .kpi-card.run .kpi-value {
   color: #60a5fa;
-  text-shadow: 0 0 12px rgba(96, 165, 250, 0.45);
+  text-shadow: 0 0 6px rgba(255, 255, 255, 0.08);
 }
 
 /* ========== TIMELINE ========== */
@@ -876,7 +1032,7 @@ onMounted(carregar);
   gap: 14px;
 }
 .timeline-head h3 {
-  font-size: 14.5px;
+  font-size: 15px;
   font-weight: 600;
   letter-spacing: -0.01em;
   margin: 0;
@@ -884,7 +1040,7 @@ onMounted(carregar);
 }
 .timeline-head p {
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
   margin: 2px 0 0;
 }
@@ -899,7 +1055,7 @@ onMounted(carregar);
   align-items: center;
   gap: 6px;
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
-  font-size: 10.5px;
+  font-size: 13px;
   color: var(--text-secondary);
 }
 .legend-dot {
@@ -931,17 +1087,48 @@ onMounted(carregar);
   background: rgba(255, 255, 255, 0.08);
 }
 
-/* ========== GRID 12x4 ========== */
+/* ========== GRID 12 x N (lotes dinamicos por empresa) ========== */
 .grid-table {
   display: grid;
-  grid-template-columns: 140px repeat(4, 1fr);
+  /* grid-template-columns vem inline via :style="gridStyle" */
   gap: 0;
+}
+.cell-vazio {
+  background: rgba(255, 255, 255, 0.015);
+}
+.cell-acao {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+}
+.btn-mini {
+  background: rgba(108, 240, 160, 0.12);
+  border: 1px solid rgba(108, 240, 160, 0.3);
+  color: #6cf0a0;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+}
+.btn-mini:hover {
+  background: rgba(108, 240, 160, 0.22);
+}
+.btn-mini-warn {
+  background: rgba(255, 200, 80, 0.12);
+  border-color: rgba(255, 200, 80, 0.3);
+  color: #ffd060;
+}
+.btn-mini-warn:hover {
+  background: rgba(255, 200, 80, 0.22);
 }
 .grid-th {
   padding: 12px 16px;
   background: rgba(255, 255, 255, 0.02);
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
-  font-size: 10.5px;
+  font-size: 13px;
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -971,14 +1158,14 @@ onMounted(carregar);
   border-right: 1px solid rgba(255, 255, 255, 0.04);
 }
 .cell-mes-label {
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--text-primary, #fff);
 }
 .cell-mes-sub {
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
-  font-size: 10.5px;
+  font-size: 13px;
   color: var(--text-muted);
 }
 .cell-mes-bar {
@@ -1052,7 +1239,7 @@ onMounted(carregar);
   padding: 3px 8px;
   border-radius: 6px;
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -1097,7 +1284,7 @@ onMounted(carregar);
   flex-wrap: wrap;
   gap: 4px 12px;
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-secondary);
   font-feature-settings: "tnum";
 }
@@ -1133,7 +1320,7 @@ onMounted(carregar);
 }
 
 .hint {
-  font-size: 10.5px;
+  font-size: 13px;
   color: var(--primary);
   font-style: italic;
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;

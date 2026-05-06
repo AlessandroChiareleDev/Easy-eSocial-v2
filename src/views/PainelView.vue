@@ -336,7 +336,7 @@ const branchPaths = [
 }
 .crumb {
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
-  font-size: 10.5px;
+  font-size: 13px;
   color: var(--text-muted);
   letter-spacing: 0.18em;
   text-transform: uppercase;
@@ -353,7 +353,7 @@ const branchPaths = [
 }
 .sub {
   margin-top: 4px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-muted);
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
   letter-spacing: 0.04em;
@@ -370,7 +370,7 @@ const branchPaths = [
 .float-metric {
   position: absolute;
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
-  font-size: 10.5px;
+  font-size: 13px;
   color: rgba(61, 242, 75, 0.85);
   text-shadow: 0 0 6px rgba(61, 242, 75, 0.4);
   background: rgba(11, 14, 20, 0.6);
@@ -526,13 +526,13 @@ const branchPaths = [
   filter: drop-shadow(0 0 4px rgba(61, 242, 75, 0.6));
 }
 .opt-title {
-  font-size: 14.5px;
+  font-size: 15px;
   font-weight: 600;
   margin-bottom: 4px;
   letter-spacing: -0.01em;
 }
 .opt-desc {
-  font-size: 11.5px;
+  font-size: 13px;
   color: var(--text-muted);
   line-height: 1.5;
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
@@ -578,7 +578,7 @@ const branchPaths = [
 }
 .opt-meta-label {
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
-  font-size: 9.5px;
+  font-size: 13px;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -626,7 +626,7 @@ const branchPaths = [
   z-index: -1;
 }
 .opt-card--glow .opt-meta-num.is-pct {
-  font-size: 13px;
+  font-size: 14px;
   text-shadow:
     0 0 4px rgba(255, 255, 255, 0.85),
     0 0 10px rgba(61, 242, 75, 0.85),
@@ -684,13 +684,13 @@ const branchPaths = [
 }
 .alert-desc {
   margin-top: 2px;
-  font-size: 11.5px;
+  font-size: 13px;
   color: var(--text-muted);
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
 }
 .alert-num {
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -703,7 +703,7 @@ const branchPaths = [
 .footer {
   text-align: center;
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
-  font-size: 10.5px;
+  font-size: 13px;
   color: var(--text-muted);
   letter-spacing: 0.08em;
   margin-top: 28px;

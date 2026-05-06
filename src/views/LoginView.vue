@@ -633,7 +633,7 @@ function loginWith(provider: OAuthProvider) {
   letter-spacing: -0.01em;
 }
 .form-sub {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-muted);
   margin: 6px 0 28px;
   text-align: center;
@@ -650,7 +650,7 @@ function loginWith(provider: OAuthProvider) {
 }
 .field-label {
   display: block;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--text-secondary);
   margin-bottom: 6px;
@@ -677,7 +677,7 @@ function loginWith(provider: OAuthProvider) {
   width: 100%;
   height: 44px;
   padding: 0 16px;
-  font-size: 14px;
+  font-size: 15px;
   font-family: inherit;
   color: #fff;
   background: rgba(255, 255, 255, 0.03);
@@ -791,7 +791,7 @@ function loginWith(provider: OAuthProvider) {
   border: 1px solid rgba(255, 100, 130, 0.3);
   border-radius: 10px;
   color: #ff8aa8;
-  font-size: 13px;
+  font-size: 14px;
 }
 .err-icon {
   width: 16px;
@@ -808,7 +808,7 @@ function loginWith(provider: OAuthProvider) {
   gap: 12px;
   margin: 24px 0 16px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 13px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -842,7 +842,7 @@ function loginWith(provider: OAuthProvider) {
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.04);
   color: var(--text);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   cursor: pointer;
   transition:

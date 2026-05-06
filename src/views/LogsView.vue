@@ -195,7 +195,7 @@ onMounted(load);
 }
 .back {
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text-muted);
   text-decoration: none;
   letter-spacing: 0.1em;
@@ -219,7 +219,7 @@ h1 {
 }
 .sub {
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 14px;
   margin: 0;
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
   letter-spacing: 0.04em;
@@ -232,7 +232,7 @@ h1 {
 }
 .counts .lbl {
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
-  font-size: 9.5px;
+  font-size: 13px;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.18em;
@@ -260,7 +260,7 @@ h1 {
   border-radius: 10px;
   padding: 9px 12px;
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 14px;
   font-family: inherit;
   outline: none;
   transition:
@@ -279,7 +279,7 @@ h1 {
 }
 .pg-btn {
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
-  font-size: 11px;
+  font-size: 13px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   padding: 7px 12px;
@@ -305,7 +305,7 @@ h1 {
 }
 .pg-info {
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
   letter-spacing: 0.06em;
 }
@@ -315,7 +315,7 @@ h1 {
   margin-bottom: 14px;
   color: #ff8a9c;
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
-  font-size: 12.5px;
+  font-size: 14px;
   border-color: rgba(255, 90, 110, 0.32) !important;
 }
 
@@ -326,13 +326,13 @@ h1 {
 table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 14px;
 }
 thead th {
   text-align: left;
   padding: 14px 16px 12px;
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
-  font-size: 10px;
+  font-size: 13px;
   text-transform: uppercase;
   letter-spacing: 0.16em;
   color: var(--text-muted);
@@ -350,7 +350,7 @@ tbody tr:hover {
 }
 .when {
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
-  font-size: 11.5px;
+  font-size: 13px;
   color: var(--text-muted);
   white-space: nowrap;
 }
@@ -365,14 +365,14 @@ tbody tr:hover {
   border: 1px solid rgba(61, 242, 75, 0.25);
   border-radius: 100px;
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
-  font-size: 10.5px;
+  font-size: 13px;
   color: var(--secondary);
   text-shadow: 0 0 6px rgba(61, 242, 75, 0.4);
   letter-spacing: 0.04em;
 }
 .det {
   color: var(--text-secondary);
-  font-size: 12.5px;
+  font-size: 14px;
   max-width: 480px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -380,7 +380,7 @@ tbody tr:hover {
 }
 .ip {
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
-  font-size: 11.5px;
+  font-size: 13px;
   color: var(--text-muted);
   white-space: nowrap;
 }
@@ -389,7 +389,7 @@ tbody tr:hover {
   padding: 60px 24px;
   text-align: center;
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text-muted);
   letter-spacing: 0.06em;
 }

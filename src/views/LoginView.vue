@@ -92,7 +92,7 @@ function loginWith(provider: OAuthProvider) {
 
         <form @submit.prevent="submit" class="form-stack" novalidate>
           <div class="field-group">
-            <label for="usuario" class="field-label">E-mail</label>
+            <label for="usuario" class="field-label">Usuário</label>
             <div class="input-wrap">
               <span class="input-icon">
                 <svg
@@ -108,10 +108,10 @@ function loginWith(provider: OAuthProvider) {
               <input
                 id="usuario"
                 v-model="email"
-                type="email"
+                type="text"
                 required
                 autocomplete="username"
-                placeholder="seu@email.com"
+                placeholder="seu usuário"
                 :disabled="auth.loading"
                 class="input-text input-text--with-icon"
               />

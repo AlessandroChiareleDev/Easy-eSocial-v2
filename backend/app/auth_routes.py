@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 
 from . import auth, sistema_db
 from .rate_limit import login_rate_limit
@@ -14,7 +14,9 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 class LoginPayload(BaseModel):
-    email: EmailStr
+    # Aceita email OU username (ex: "Ana", "xandeadmin"). A validacao de
+    # existencia/credenciais e feita pelo lookup em sistema.users abaixo.
+    email: str
     password: str
 
 

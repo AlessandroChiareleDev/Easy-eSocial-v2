@@ -48,6 +48,7 @@ bash deploy/scripts/provision.sh
 ```
 
 O script:
+
 1. Instala Python 3.12, Node 20, libs.
 2. Cria user `esocial` e estrutura `/opt/easy-esocial/`.
 3. Clona o repo, monta `.venv`, instala deps.
@@ -63,11 +64,13 @@ sudo -u esocial nano /opt/easy-esocial/backend/.env
 ```
 
 Preencher:
+
 - `SISTEMA_DB_URL` — DSN Supabase (V2 usa Supabase, não o DB do V1)
 - `JWT_SECRET` — `openssl rand -hex 64`
 - `FERNET_KEY` — `python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
 
 Build + start V2:
+
 ```bash
 sudo -u esocial bash /opt/easy-esocial/repo/deploy/scripts/deploy.sh
 systemctl status easy-esocial
@@ -77,6 +80,7 @@ curl http://127.0.0.1:8001/health
 V2 está rodando na **porta 8001** (interna). V1 continua respondendo no domínio público — usuários nem notaram.
 
 Você pode testar o V2 fazendo um túnel SSH:
+
 ```bash
 # no seu pc local:
 ssh -L 8001:127.0.0.1:8001 root@SEU_IP_VPS
@@ -92,6 +96,7 @@ bash /opt/easy-esocial/repo/deploy/scripts/cutover_v1_to_v2.sh
 ```
 
 O script:
+
 1. Verifica que V2 tá saudável (`/health` interno).
 2. Faz **backup** do nginx config V1 em `/opt/easy-esocial/backups/v1-cutover/`.
 3. Para V1 (pm2 ou systemd, ambos cobertos).
@@ -126,6 +131,7 @@ Faz `git pull` → rsync backend → pip install → npm build → restart syste
 ## Backups Supabase (cron)
 
 Adicionar em `/etc/cron.d/easy-esocial-backup`:
+
 ```cron
 0 3 * * * esocial /opt/easy-esocial/repo/deploy/scripts/backup_supabase.sh >> /opt/easy-esocial/logs/backup.log 2>&1
 ```

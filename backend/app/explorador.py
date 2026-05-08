@@ -32,8 +32,10 @@ def _extrair_sequencial(filename: str) -> str | None:
 
 
 def _ensure_empresa(empresa_id: int) -> dict:
+    from . import tenant
+    internal_id = tenant.internal_empresa_id(empresa_id)
     with db.cursor(empresa_id=empresa_id) as c:
-        c.execute("SELECT id, nome, tipo_estado FROM master_empresas WHERE id=%s", (empresa_id,))
+        c.execute("SELECT id, nome, tipo_estado FROM master_empresas WHERE id=%s", (internal_id,))
         row = c.fetchone()
     if not row:
         raise HTTPException(404, f"empresa_id={empresa_id} não existe em master_empresas")
@@ -194,6 +196,8 @@ def upload_zip(
 
 @router.get("/zips")
 def listar_zips(empresa_id: int, limit: int = 100, offset: int = 0):
+    from . import tenant
+    internal_id = tenant.internal_empresa_id(empresa_id)
     with db.cursor(empresa_id=empresa_id) as c:
         c.execute(
             """
@@ -206,7 +210,7 @@ def listar_zips(empresa_id: int, limit: int = 100, offset: int = 0):
             ORDER BY enviado_em DESC
             LIMIT %s OFFSET %s
             """,
-            (empresa_id, limit, offset),
+            (internal_id, limit, offset),
         )
         rows = [dict(r) for r in c.fetchall()]
     # serialize datas
@@ -302,6 +306,8 @@ def deletar_zip(zip_id: int):
 @router.get("/atividade")
 def listar_atividade(empresa_id: int, limit: int = 200):
     """Histórico de upload/exclusão/extração/duplicado."""
+    from . import tenant
+    internal_id = tenant.internal_empresa_id(empresa_id)
     with db.cursor(empresa_id=empresa_id) as c:
         c.execute(
             """
@@ -312,7 +318,7 @@ def listar_atividade(empresa_id: int, limit: int = 200):
             ORDER BY criado_em DESC
             LIMIT %s
             """,
-            (empresa_id, limit),
+            (internal_id, limit),
         )
         rows = [dict(r) for r in c.fetchall()]
     for r in rows:

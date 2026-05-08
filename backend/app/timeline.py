@@ -8,7 +8,7 @@ import psycopg2.extras
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
-from . import db, storage
+from . import db, storage, tenant
 
 router = APIRouter(prefix="/api/explorador/timeline", tags=["chain-walk"])
 
@@ -30,7 +30,8 @@ def _serialize(rows: list[dict]) -> list[dict]:
 @router.get("/meses")
 def listar_meses(empresa_id: int):
     """Lista todos os perApur que têm timeline_mes para a empresa."""
-    with db.cursor() as c:
+    internal_id = tenant.internal_empresa_id(empresa_id)
+    with db.cursor(empresa_id=empresa_id) as c:
         c.execute(
             """
             SELECT m.id, m.per_apur, m.head_envio_id, m.criado_em,
@@ -44,7 +45,7 @@ def listar_meses(empresa_id: int):
              GROUP BY m.id
              ORDER BY m.per_apur DESC
             """,
-            (empresa_id,),
+            (internal_id,),
         )
         rows = c.fetchall()
     return {"ok": True, "items": _serialize(rows)}
@@ -55,10 +56,11 @@ def listar_meses(empresa_id: int):
 # ---------------------------------------------------------------------------
 @router.get("")
 def regua_mes(empresa_id: int, per_apur: str = Query(..., min_length=7, max_length=7)):
-    with db.cursor() as c:
+    internal_id = tenant.internal_empresa_id(empresa_id)
+    with db.cursor(empresa_id=empresa_id) as c:
         c.execute(
             "SELECT * FROM timeline_mes WHERE empresa_id=%s AND per_apur=%s",
-            (empresa_id, per_apur),
+            (internal_id, per_apur),
         )
         m = c.fetchone()
         if not m:
@@ -170,7 +172,8 @@ def cadeia_cpf(
     per_apur: str,
     tipo_evento: str = "S-1210",
 ):
-    with db.cursor() as c:
+    internal_id = tenant.internal_empresa_id(empresa_id)
+    with db.cursor(empresa_id=empresa_id) as c:
         c.execute(
             """
             SELECT ev.id, ev.cpf, ev.per_apur, ev.tipo_evento,
@@ -188,7 +191,7 @@ def cadeia_cpf(
                AND z.empresa_id = %s
              ORDER BY te.sequencia NULLS FIRST, ev.id
             """,
-            (tipo_evento, cpf, per_apur, empresa_id),
+            (tipo_evento, cpf, per_apur, internal_id),
         )
         versoes = c.fetchall()
 
@@ -210,7 +213,7 @@ def cadeia_cpf(
                AND it.tipo_evento = %s
              ORDER BY te.sequencia, it.id
             """,
-            (empresa_id, per_apur, cpf, tipo_evento),
+            (internal_id, per_apur, cpf, tipo_evento),
         )
         tentativas = c.fetchall()
     return {

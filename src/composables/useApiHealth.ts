@@ -30,10 +30,21 @@ export function useApiHealth(opts: HealthOptions = {}) {
     status.value = "checking";
     const t0 = performance.now();
     try {
-      // /health é público no backend antigo
-      await api.get("/health", { skipAuth: true });
+      // Ping direto via fetch: se o servidor RESPONDE com qualquer
+      // status HTTP (ate 401/404), o backend esta vivo. So consideramos
+      // offline em erro de rede / timeout / 5xx.
+      const ctrl = new AbortController();
+      const to = window.setTimeout(() => ctrl.abort(), 8_000);
+      const res = await fetch("/api/health", {
+        method: "GET",
+        signal: ctrl.signal,
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      window.clearTimeout(to);
       latencyMs.value = Math.round(performance.now() - t0);
-      status.value = "online";
+      // 5xx = backend reclamando, marca offline. 2xx/3xx/4xx = vivo.
+      status.value = res.status >= 500 ? "offline" : "online";
     } catch {
       latencyMs.value = null;
       status.value = "offline";

@@ -28,5 +28,8 @@ jobs:
             sudo -u esocial git fetch --all
             sudo -u esocial git checkout main
             sudo -u esocial git pull --ff-only
-            sudo -u esocial bash /opt/easy-esocial/repo/deploy/scripts/deploy.sh main
+            # Roda deploy.sh como ROOT: assim o systemctl restart final
+            # funciona sem prompt de senha. O proprio script ja lida com
+            # EUID=0 (sem usar sudo internamente).
+            bash /opt/easy-esocial/repo/deploy/scripts/deploy.sh main
             curl -sfk https://easyesocial.com.br/api/health && echo "DEPLOY OK"

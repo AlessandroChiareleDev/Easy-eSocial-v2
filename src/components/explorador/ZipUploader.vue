@@ -128,12 +128,9 @@ async function startUpload() {
 async function pollExtracao(zipId: number) {
   // Dispara extração e aguarda concluir
   try {
-    const r = await fetch(
-        `/api/explorador/zips/${zipId}/extrair`,
-      {
-        method: "POST",
-      },
-    );
+    const r = await fetch(`/api/explorador/zips/${zipId}/extrair`, {
+      method: "POST",
+    });
     if (!r.ok) throw new Error(`extração: HTTP ${r.status}`);
     // Quando o POST volta, já está extraído (síncrono)
     const det = await detalheZip(zipId);

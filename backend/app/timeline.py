@@ -184,14 +184,12 @@ def cadeia_cpf(
                    te.iniciado_em
               FROM explorador_eventos ev
               LEFT JOIN timeline_envio te ON te.id = ev.origem_envio_id
-              JOIN empresa_zips_brutos z ON z.id = ev.zip_id
              WHERE ev.tipo_evento = %s
                AND ev.cpf = %s
                AND ev.per_apur = %s
-               AND z.empresa_id = %s
              ORDER BY te.sequencia NULLS FIRST, ev.id
             """,
-            (tipo_evento, cpf, per_apur, internal_id),
+            (tipo_evento, cpf, per_apur),
         )
         versoes = c.fetchall()
 
@@ -326,9 +324,7 @@ def s1210_anual_overview(ano: int, empresa_id: int):
                         WITH scope AS (
                             SELECT DISTINCT ev.cpf
                               FROM explorador_eventos ev
-                              JOIN empresa_zips_brutos z ON z.id=ev.zip_id
-                             WHERE z.empresa_id=%s
-                               AND ev.tipo_evento='S-1210'
+                             WHERE ev.tipo_evento='S-1210'
                                AND ev.per_apur=%s
                                AND ev.retificado_por_id IS NULL
                                AND ev.cpf IS NOT NULL
@@ -358,7 +354,7 @@ def s1210_anual_overview(ano: int, empresa_id: int):
                           FROM scope s
                           LEFT JOIN ult u ON u.cpf = s.cpf
                         """,
-                        (internal_id, per, internal_id, per),
+                        (per, internal_id, per),
                     )
                     row = c.fetchone() or {}
                     total = int(row.get("total") or 0)
@@ -435,15 +431,13 @@ def s1210_cpfs_do_mes(per_apur: str, empresa_id: int, lote_num: int = 1):
                            ev.id, ev.cpf, ev.nr_recibo, ev.referenciado_recibo,
                            ev.dt_processamento
                       FROM explorador_eventos ev
-                      JOIN empresa_zips_brutos z ON z.id=ev.zip_id
-                     WHERE z.empresa_id=%s
-                       AND ev.tipo_evento='S-1210'
+                     WHERE ev.tipo_evento='S-1210'
                        AND ev.per_apur=%s
                        AND ev.retificado_por_id IS NULL
                        AND ev.cpf IS NOT NULL
                      ORDER BY ev.cpf, ev.dt_processamento DESC NULLS LAST, ev.id DESC
                     """,
-                    (internal_id, per_apur),
+                    (per_apur,),
                 )
                 cpfs_rows = list(c.fetchall())
             except Exception:

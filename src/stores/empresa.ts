@@ -1,34 +1,22 @@
 /**
- * Empresa store - multi-tenant.
+ * Empresa store — multi-tenant V2 (CNPJ-based).
  *
- * Persiste a empresa selecionada no localStorage (apenas id/nome/cnpj,
- * NUNCA token). Token continua so em memoria (auth store).
- *
- * Apos login o usuario e mandado pra /empresas pra escolher; o id
- * escolhido vai automaticamente em todo request /py-api via interceptor.
+ * A lista de empresas vem do auth store (popular no login).
+ * Aqui guardamos apenas qual está ATIVA (CNPJ) — persistido em
+ * localStorage. Todo request usa header X-Empresa-CNPJ via api.ts.
  */
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
+import { useAuthStore, type AuthEmpresa } from "./auth";
 
-export interface Empresa {
-  id: number;
-  nome: string;
-  cnpj: string;
-  ativo: boolean;
-  tem_dados?: boolean;
-  xlsx_count?: number;
-  envios_count?: number;
-  db_kind?: "supabase" | "local" | string;
-}
+export type Empresa = AuthEmpresa;
 
-const LS_KEY = "easy_v2_empresa_atual";
+const LS_KEY = "easy_v2_empresa_cnpj";
 
-function loadFromStorage(): Empresa | null {
+function loadCnpjFromStorage(): string | null {
   try {
     const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed.id === "number") return parsed as Empresa;
+    if (typeof raw === "string" && raw.length > 0) return raw;
   } catch {
     /* ignore */
   }
@@ -36,50 +24,38 @@ function loadFromStorage(): Empresa | null {
 }
 
 export const useEmpresaStore = defineStore("empresa", () => {
-  const current = ref<Empresa | null>(loadFromStorage());
-  const lista = ref<Empresa[]>([]);
-  const loading = ref(false);
-  const error = ref<string | null>(null);
+  const currentCnpj = ref<string | null>(loadCnpjFromStorage());
+
+  const lista = computed<Empresa[]>(() => {
+    const auth = useAuthStore();
+    return auth.empresas;
+  });
+
+  const current = computed<Empresa | null>(() => {
+    if (!currentCnpj.value) return null;
+    return lista.value.find((e) => e.cnpj === currentCnpj.value) ?? null;
+  });
 
   const hasSelected = computed(() => !!current.value);
-  const currentId = computed(() => current.value?.id ?? null);
 
-  async function carregar(): Promise<void> {
-    loading.value = true;
-    error.value = null;
+  function setEmpresa(emp: Empresa): void {
+    currentCnpj.value = emp.cnpj;
     try {
-      const res = await fetch("/explorador-api/api/empresas", {
-        headers: { Accept: "application/json" },
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const body = (await res.json()) as { empresas: Empresa[] };
-      lista.value = body.empresas ?? [];
-      // se a empresa atual nao existe mais na lista, limpa
-      if (
-        current.value &&
-        !lista.value.some((e) => e.id === current.value!.id)
-      ) {
-        clear();
-      }
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : "Falha ao listar empresas";
-      lista.value = [];
-    } finally {
-      loading.value = false;
+      localStorage.setItem(LS_KEY, emp.cnpj);
+    } catch {
+      /* ignore */
     }
   }
 
-  function setEmpresa(emp: Empresa): void {
-    current.value = emp;
-    try {
-      localStorage.setItem(LS_KEY, JSON.stringify(emp));
-    } catch {
-      /* storage cheio ou bloqueado - tudo bem, segue em memoria */
-    }
+  function setEmpresaByCnpj(cnpj: string): boolean {
+    const found = lista.value.find((e) => e.cnpj === cnpj);
+    if (!found) return false;
+    setEmpresa(found);
+    return true;
   }
 
   function clear(): void {
-    current.value = null;
+    currentCnpj.value = null;
     try {
       localStorage.removeItem(LS_KEY);
     } catch {
@@ -88,14 +64,14 @@ export const useEmpresaStore = defineStore("empresa", () => {
   }
 
   return {
+    currentCnpj,
     current,
     lista,
-    loading,
-    error,
     hasSelected,
-    currentId,
-    carregar,
+    /** @deprecated V1 leftover: views S1210Anual/Mes ainda usam currentId */
+    currentId: computed<number | null>(() => null),
     setEmpresa,
+    setEmpresaByCnpj,
     clear,
   };
 });

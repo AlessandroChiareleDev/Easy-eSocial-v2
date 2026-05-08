@@ -9,7 +9,7 @@ const auth = useAuthStore();
 const { stats } = useStats();
 
 const greetingName = computed(
-  () => auth.user?.nome || auth.user?.username || "operador",
+  () => auth.user?.nome || auth.user?.email || "operador",
 );
 
 const today = new Date();

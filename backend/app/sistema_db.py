@@ -117,7 +117,11 @@ def fetch_user_empresas(user_id: str) -> list[dict[str, Any]]:
     with sistema_conn() as c, c.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
             """
-            SELECT ue.cnpj, er.razao_social, ue.papel
+            SELECT ue.cnpj,
+                   er.razao_social,
+                   er.schema_name,
+                   er.ativo,
+                   ue.papel
               FROM user_empresas ue
               JOIN empresas_routing er ON er.cnpj = ue.cnpj
              WHERE ue.user_id = %s AND er.ativo = TRUE

@@ -1,13 +1,15 @@
 /**
- * Cliente HTTP fino — proxy /api → backend Express :3333 (via vite.config)
+ * Cliente HTTP fino — proxy /api → backend FastAPI V2 :8000 (via vite.config).
  *
- * Segurança:
- * - Token JWT lido APENAS da memória (Pinia store), NUNCA de localStorage
- * - X-CSRF-Token será adicionado quando backend suportar
- * - Erros 401 disparam logout automático
+ * Auto-injeta:
+ *  - Authorization: Bearer <token> (do auth store)
+ *  - X-Empresa-CNPJ: <cnpj-ativo> (do empresa store)
+ *
+ * Erros 401 disparam logout automático.
  */
 
 import { useAuthStore } from "@/stores/auth";
+import { useEmpresaStore } from "@/stores/empresa";
 
 export interface ApiError extends Error {
   status: number;
@@ -20,8 +22,10 @@ interface RequestOptions {
   headers?: Record<string, string>;
   /** Pula o header Authorization (usar em /auth/login) */
   skipAuth?: boolean;
-  /** Header X-Empresa-Id quando endpoint exige */
-  empresaId?: string | number;
+  /** Pula injeção automática do X-Empresa-CNPJ */
+  skipTenant?: boolean;
+  /** Override manual do CNPJ (raro — super admin) */
+  cnpj?: string;
 }
 
 const BASE = "/api";
@@ -44,8 +48,9 @@ async function request<T = unknown>(
     if (auth.token) headers["Authorization"] = `Bearer ${auth.token}`;
   }
 
-  if (opts.empresaId !== undefined) {
-    headers["X-Empresa-Id"] = String(opts.empresaId);
+  if (!opts.skipTenant) {
+    const cnpj = opts.cnpj ?? useEmpresaStore().currentCnpj;
+    if (cnpj) headers["X-Empresa-CNPJ"] = cnpj;
   }
 
   const init: RequestInit = {

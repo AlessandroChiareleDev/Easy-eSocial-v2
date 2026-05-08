@@ -14,26 +14,26 @@ export default defineConfig({
   server: {
     port: 5174,
     strictPort: true,
-    // Proxy reverso pro backend Node antigo (Express :3333)
+    // Proxy reverso pro backend V2 unificado (FastAPI :8000)
     // Frontend chama sempre /api/... → same-origin, CSP fica simples
     proxy: {
       "/api": {
-        target: "http://localhost:3333",
+        target: "http://localhost:8000",
         changeOrigin: true,
+        // uploads grandes (XLSX dominio, ZIPs eSocial) — sem timeout
+        timeout: 0,
+        proxyTimeout: 0,
       },
-      // Backend Python (FastAPI) — serve TUDO de eSocial S-1010/S-1210
+      // LEGACY V1 — manter ate frontend ser totalmente migrado
       "/py-api": {
         target: "http://localhost:8000",
         changeOrigin: true,
         rewrite: (p) => p.replace(/^\/py-api/, ""),
       },
-      // Backend NOVO do Explorador (FastAPI :8001)
       "/explorador-api": {
-        target: "http://localhost:8001",
+        target: "http://localhost:8000",
         changeOrigin: true,
         rewrite: (p) => p.replace(/^\/explorador-api/, ""),
-        // uploads de 1+ GB podem levar minutos no servidor depois do
-        // upload acabar (SHA256 + escrita no Large Object). Sem timeout.
         timeout: 0,
         proxyTimeout: 0,
       },

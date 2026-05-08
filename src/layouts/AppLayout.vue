@@ -12,10 +12,10 @@ const router = useRouter();
 const health = useApiHealth();
 
 const userName = computed(
-  () => auth.user?.nome || auth.user?.username || "convidado",
+  () => auth.user?.nome || auth.user?.email || "convidado",
 );
 
-const empresaLabel = computed(() => empresa.current?.nome ?? "—");
+const empresaLabel = computed(() => empresa.current?.razao_social ?? "—");
 
 const healthLabel = computed(() => {
   switch (health.status.value) {

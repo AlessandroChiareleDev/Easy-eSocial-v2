@@ -1,26 +1,28 @@
 <script setup lang="ts">
-import { onMounted, computed } from "vue";
+import { computed } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useEmpresaStore, type Empresa } from "@/stores/empresa";
+import { useAuthStore } from "@/stores/auth";
 
 const router = useRouter();
 const route = useRoute();
 const store = useEmpresaStore();
-
-onMounted(() => {
-  void store.carregar();
-});
+const auth = useAuthStore();
 
 const empresas = computed<Empresa[]>(() => store.lista);
 
 function escolher(emp: Empresa): void {
+  if (emp.ativo === false) return;
   store.setEmpresa(emp);
   const redirect = (route.query.redirect as string) || "/";
   router.replace(redirect);
 }
 
 function fmtCnpj(c: string): string {
-  return c || "—";
+  if (!c) return "—";
+  const d = c.replace(/\D/g, "");
+  if (d.length !== 14) return c;
+  return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`;
 }
 </script>
 
@@ -29,46 +31,41 @@ function fmtCnpj(c: string): string {
     <header class="head">
       <h1>Escolha a empresa</h1>
       <p class="sub">
-        Cada empresa tem seu próprio banco de dados isolado. Os dados que você
-        vai ver dependem da escolha aqui.
+        Cada empresa tem seu próprio schema isolado no banco. Os dados que
+        você vai ver dependem da escolha aqui.
+      </p>
+      <p v-if="auth.user" class="who">
+        Logado como <strong>{{ auth.user.email }}</strong>
+        <span v-if="auth.isSuperAdmin" class="super">super admin</span>
       </p>
     </header>
 
-    <div v-if="store.loading" class="state">Carregando empresas…</div>
-    <div v-else-if="store.error" class="state error">
-      Falha ao carregar empresas: {{ store.error }}
-    </div>
-    <div v-else-if="empresas.length === 0" class="state">
-      Nenhuma empresa ativa cadastrada.
+    <div v-if="empresas.length === 0" class="state">
+      Nenhuma empresa vinculada ao seu usuário.
     </div>
 
     <div v-else class="cards">
       <button
         v-for="emp in empresas"
-        :key="emp.id"
+        :key="emp.cnpj"
         class="card"
-        :class="{ vazio: !emp.tem_dados }"
+        :class="{ inativo: emp.ativo === false }"
+        :disabled="emp.ativo === false"
         @click="escolher(emp)"
       >
         <div class="badge-row">
-          <span class="badge db" :class="emp.db_kind">{{ emp.db_kind }}</span>
+          <span class="badge papel">{{ emp.papel }}</span>
           <span
-            class="badge dados"
-            :class="{ ok: emp.tem_dados, no: !emp.tem_dados }"
+            class="badge status"
+            :class="{ ok: emp.ativo !== false, no: emp.ativo === false }"
           >
-            {{ emp.tem_dados ? "com dados" : "vazia" }}
+            {{ emp.ativo === false ? "inativa" : "ativa" }}
           </span>
         </div>
-        <div class="logo">{{ emp.nome.charAt(0) }}</div>
-        <h2 class="nome">{{ emp.nome }}</h2>
+        <div class="logo">{{ (emp.razao_social || emp.cnpj).charAt(0) }}</div>
+        <h2 class="nome">{{ emp.razao_social || emp.schema_name || emp.cnpj }}</h2>
         <div class="cnpj">CNPJ {{ fmtCnpj(emp.cnpj) }}</div>
-        <div v-if="emp.tem_dados" class="meta">
-          {{ emp.envios_count?.toLocaleString("pt-BR") ?? 0 }} envios ·
-          {{ emp.xlsx_count ?? 0 }} XLSX
-        </div>
-        <div v-else class="meta muted">
-          banco recém-criado, sem operação ainda
-        </div>
+        <div class="meta">schema: {{ emp.schema_name || "—" }}</div>
         <span class="cta">Entrar →</span>
       </button>
     </div>
@@ -131,9 +128,11 @@ function fmtCnpj(c: string): string {
   border-color: rgba(96, 165, 250, 0.5);
   box-shadow: 0 12px 32px -8px rgba(59, 130, 246, 0.35);
 }
-.card.vazio {
+.card.inativo {
   border-style: dashed;
   border-color: rgba(148, 163, 184, 0.25);
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .badge-row {
   display: flex;
@@ -148,21 +147,17 @@ function fmtCnpj(c: string): string {
   padding: 4px 10px;
   border-radius: 999px;
 }
-.badge.db.supabase {
-  background: rgba(62, 207, 142, 0.15);
-  color: #6ee7b7;
-}
-.badge.db.local {
+.badge.papel {
   background: rgba(96, 165, 250, 0.15);
   color: #93c5fd;
 }
-.badge.dados.ok {
+.badge.status.ok {
   background: rgba(34, 197, 94, 0.15);
   color: #86efac;
 }
-.badge.dados.no {
-  background: rgba(148, 163, 184, 0.15);
-  color: #cbd5e1;
+.badge.status.no {
+  background: rgba(248, 113, 113, 0.15);
+  color: #fca5a5;
 }
 .logo {
   width: 56px;

@@ -4,7 +4,7 @@ import { useRouter, useRoute } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import BrainStage from "@/components/base/BrainStage.vue";
 
-const username = ref("");
+const email = ref("");
 const senha = ref("");
 const showPwd = ref(false);
 
@@ -13,9 +13,9 @@ const router = useRouter();
 const route = useRoute();
 
 async function submit() {
-  if (!username.value || !senha.value) return;
+  if (!email.value || !senha.value) return;
   try {
-    await auth.login(username.value.trim(), senha.value);
+    await auth.login(email.value.trim(), senha.value);
     const redirect = (route.query.redirect as string) || "/";
     router.replace(redirect);
   } catch {
@@ -92,7 +92,7 @@ function loginWith(provider: OAuthProvider) {
 
         <form @submit.prevent="submit" class="form-stack" novalidate>
           <div class="field-group">
-            <label for="usuario" class="field-label">Usuário</label>
+            <label for="usuario" class="field-label">E-mail</label>
             <div class="input-wrap">
               <span class="input-icon">
                 <svg
@@ -107,11 +107,11 @@ function loginWith(provider: OAuthProvider) {
               </span>
               <input
                 id="usuario"
-                v-model="username"
-                type="text"
+                v-model="email"
+                type="email"
                 required
                 autocomplete="username"
-                placeholder="Seu usuário"
+                placeholder="seu@email.com"
                 :disabled="auth.loading"
                 class="input-text input-text--with-icon"
               />

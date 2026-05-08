@@ -26,7 +26,7 @@ async function carregar() {
     historicoRef.value?.carregar();
   } catch (e) {
     erro.value =
-      "Não foi possível conectar ao backend do Explorador. Confirme que o servidor está rodando em http://localhost:8001.";
+      "Não foi possível carregar os ZIPs do Explorador. Tente novamente em instantes.";
   } finally {
     carregando.value = false;
   }

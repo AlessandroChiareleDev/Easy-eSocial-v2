@@ -129,7 +129,7 @@ async function pollExtracao(zipId: number) {
   // Dispara extração e aguarda concluir
   try {
     const r = await fetch(
-      `/explorador-api/api/explorador/zips/${zipId}/extrair`,
+        `/api/explorador/zips/${zipId}/extrair`,
       {
         method: "POST",
       },

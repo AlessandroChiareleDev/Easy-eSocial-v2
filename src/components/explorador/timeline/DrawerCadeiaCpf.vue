@@ -124,13 +124,13 @@ function statusBadge(s: string) {
                 <div class="dl">
                   <a
                     v-if="t.xml_enviado_disponivel"
-                    :href="`/explorador-api/api/explorador/tentativa/${t.id}/xml-enviado`"
+                    :href="`/api/explorador/tentativa/${t.id}/xml-enviado`"
                     target="_blank"
                     >📤 XML enviado</a
                   >
                   <a
                     v-if="t.xml_retorno_disponivel"
-                    :href="`/explorador-api/api/explorador/tentativa/${t.id}/xml-retorno`"
+                    :href="`/api/explorador/tentativa/${t.id}/xml-retorno`"
                     target="_blank"
                     >📥 XML retorno</a
                   >

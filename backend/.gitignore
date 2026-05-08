@@ -1,0 +1,32 @@
+# Ambiente Python local
+.venv/
+__pycache__/
+*.pyc
+
+# Env (segredos)
+.env
+
+# Uploads temporários (caso surjam)
+_tmp/
+
+# Scripts de debug / one-off / logs locais (não vão pro repo)
+_*.py
+_*.txt
+_*.err
+_*.log
+_envio_*.log
+_archive/
+*.err
+envio_*_log.txt
+diff_xml.txt
+
+# Exceção: __init__.py é código vivo
+!**/__init__.py
+
+# Certificados (defesa em profundidade — root .gitignore já cobre)
+*.pfx
+*.p12
+*.key
+*.pem
+certs/
+certificados/

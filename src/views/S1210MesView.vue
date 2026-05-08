@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { pyApi } from "@/services/pythonApi";
+import { s1210CpfsDoMes } from "@/services/exploradorApi";
 import { useEmpresaStore } from "@/stores/empresa";
 
 const props = defineProps<{ per_apur: string; lote_num: string }>();
@@ -17,9 +17,20 @@ interface CpfRow {
   status: string;
   nr_recibo_usado: string | null;
   nr_recibo_novo: string | null;
+  erro_codigo: string | null;
   descricao_resposta: string | null;
   erro_descricao: string | null;
   enviado_em: string | null;
+}
+
+// Bandeira semantica derivada do erro_codigo
+type FlagTipo = "recibo_retificado" | "aceito_com_aviso" | null;
+function flagDoCpf(r: CpfRow): FlagTipo {
+  const cod = r.erro_codigo;
+  if (!cod) return null;
+  if (cod === "401" || cod === "459") return "recibo_retificado";
+  if (cod === "202") return "aceito_com_aviso";
+  return null;
 }
 
 interface Resp {
@@ -75,7 +86,16 @@ const linhas = computed(() => {
 
 const contagem = computed(() => {
   if (!data.value)
-    return { total: 0, ok: 0, erro: 0, pendente: 0, enviando: 0, na: 0 };
+    return {
+      total: 0,
+      ok: 0,
+      erro: 0,
+      pendente: 0,
+      enviando: 0,
+      na: 0,
+      recibo_retificado: 0,
+      aceito_com_aviso: 0,
+    };
   const c = {
     total: data.value.total,
     ok: 0,
@@ -83,6 +103,8 @@ const contagem = computed(() => {
     pendente: 0,
     enviando: 0,
     na: 0,
+    recibo_retificado: 0,
+    aceito_com_aviso: 0,
   };
   for (const r of data.value.cpfs) {
     if (r.status === "ok") c.ok++;
@@ -90,6 +112,9 @@ const contagem = computed(() => {
     else if (r.status === "enviando") c.enviando++;
     else if (r.status === "na") c.na++;
     else c.pendente++;
+    const f = flagDoCpf(r);
+    if (f === "recibo_retificado") c.recibo_retificado++;
+    else if (f === "aceito_com_aviso") c.aceito_com_aviso++;
   }
   return c;
 });
@@ -124,13 +149,17 @@ async function carregar() {
   loading.value = true;
   error.value = null;
   try {
-    data.value = await pyApi.get<Resp>("/api/s1210-repo/cpfs-do-mes", {
-      query: {
-        per_apur: props.per_apur,
-        lote_num: Number(props.lote_num),
-        empresa_id: empresaId.value,
-      },
-    });
+    const resp = await s1210CpfsDoMes(
+      props.per_apur,
+      empresaId.value,
+      Number(props.lote_num),
+    );
+    data.value = {
+      empresa_id: resp.empresa_id,
+      per_apur: resp.per_apur,
+      total: resp.total,
+      cpfs: resp.cpfs as unknown as CpfRow[],
+    };
   } catch (e) {
     error.value = e instanceof Error ? e.message : "Falha ao carregar CPFs";
     data.value = null;
@@ -212,6 +241,38 @@ function voltar() {
           <div class="kpi-label">NA</div>
           <div class="kpi-value na">{{ contagem.na }}</div>
         </div>
+        <div
+          v-if="contagem.recibo_retificado > 0"
+          class="kpi-card kpi-flag kpi-flag--retif"
+          title="CPFs cuja resposta do eSocial foi 401-459: o recibo do S-1200 referenciado foi retificado posteriormente. Necessario reextrair recibos atualizados (ZIP novo)."
+        >
+          <div class="kpi-label">🔁 Recibo retificado</div>
+          <div class="kpi-value retif">{{ contagem.recibo_retificado }}</div>
+        </div>
+        <div
+          v-if="contagem.aceito_com_aviso > 0"
+          class="kpi-card kpi-flag kpi-flag--aviso"
+          title="CPFs com codigo 202: aceito pelo eSocial com advertencia (rubrica/deducao). Nao precisa reenviar."
+        >
+          <div class="kpi-label">⚠ Aceito c/ aviso</div>
+          <div class="kpi-value aviso">{{ contagem.aceito_com_aviso }}</div>
+        </div>
+      </div>
+
+      <div
+        v-if="contagem.recibo_retificado > 0"
+        class="banner-flag banner-flag--retif"
+        role="status"
+      >
+        <strong
+          >🔁 Este mês tem {{ contagem.recibo_retificado }} CPF(s) com recibo
+          retificado externamente</strong
+        >
+        <span
+          >O eSocial retornou 401-459 (“não foi localizado evento para o recibo
+          informado”). É preciso reextrair os recibos atualizados via ZIP novo
+          do eSocial antes de retentar.</span
+        >
       </div>
 
       <div class="filters">
@@ -253,6 +314,18 @@ function voltar() {
               <td>{{ r.nome || "—" }}</td>
               <td>
                 <span :class="classeStatus(r.status)">{{ r.status }}</span>
+                <span
+                  v-if="flagDoCpf(r) === 'recibo_retificado'"
+                  class="flag flag--retif"
+                  :title="`Codigo ${r.erro_codigo}: recibo retificado externamente. Reextrair recibos via ZIP novo.`"
+                  >🔁 retif</span
+                >
+                <span
+                  v-else-if="flagDoCpf(r) === 'aceito_com_aviso'"
+                  class="flag flag--aviso"
+                  :title="`Codigo 202: aceito pelo eSocial com advertencia.`"
+                  >⚠ aviso</span
+                >
               </td>
               <td class="mono small">{{ r.nr_recibo_xml || "—" }}</td>
               <td class="mono small">{{ r.nr_recibo_usado || "—" }}</td>
@@ -525,5 +598,63 @@ function voltar() {
   background: rgba(255, 255, 255, 0.04);
   border-color: rgba(255, 255, 255, 0.1);
   color: rgba(255, 255, 255, 0.4);
+}
+
+/* Flags semanticas */
+.flag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  vertical-align: middle;
+  cursor: help;
+}
+.flag--retif {
+  background: rgba(255, 130, 80, 0.18);
+  color: #ffaa70;
+  border: 1px solid rgba(255, 130, 80, 0.35);
+}
+.flag--aviso {
+  background: rgba(255, 200, 80, 0.18);
+  color: #ffd060;
+  border: 1px solid rgba(255, 200, 80, 0.35);
+}
+.kpi-card.kpi-flag {
+  cursor: help;
+}
+.kpi-flag--retif {
+  border: 1px solid rgba(255, 130, 80, 0.35);
+  background: rgba(255, 130, 80, 0.06);
+}
+.kpi-flag--aviso {
+  border: 1px solid rgba(255, 200, 80, 0.35);
+  background: rgba(255, 200, 80, 0.06);
+}
+.kpi-value.retif {
+  color: #ffaa70;
+}
+.kpi-value.aviso {
+  color: #ffd060;
+}
+.banner-flag {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin: 12px 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.banner-flag--retif {
+  background: rgba(255, 130, 80, 0.08);
+  border: 1px solid rgba(255, 130, 80, 0.32);
+  color: #ffc6a0;
+}
+.banner-flag strong {
+  color: #ffaa70;
 }
 </style>

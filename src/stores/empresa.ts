@@ -48,12 +48,19 @@ export const useEmpresaStore = defineStore("empresa", () => {
     loading.value = true;
     error.value = null;
     try {
-      const res = await fetch("/py-api/api/empresas", {
+      const res = await fetch("/explorador-api/api/empresas", {
         headers: { Accept: "application/json" },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body = (await res.json()) as { empresas: Empresa[] };
       lista.value = body.empresas ?? [];
+      // se a empresa atual nao existe mais na lista, limpa
+      if (
+        current.value &&
+        !lista.value.some((e) => e.id === current.value!.id)
+      ) {
+        clear();
+      }
     } catch (e) {
       error.value = e instanceof Error ? e.message : "Falha ao listar empresas";
       lista.value = [];

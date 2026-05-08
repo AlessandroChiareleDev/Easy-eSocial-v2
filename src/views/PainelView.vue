@@ -45,7 +45,7 @@ interface Card {
   numLabel: string;
   isPct?: boolean;
   glow?: boolean;
-  icon: "grid" | "send" | "calendar" | "logs";
+  icon: "grid" | "send" | "calendar" | "logs" | "folder";
 }
 
 const cards = computed<Card[]>(() => [
@@ -82,6 +82,15 @@ const cards = computed<Card[]>(() => [
     num: fmtNum(stats.value.totalLogs),
     numLabel: "eventos",
     icon: "logs",
+  },
+  {
+    to: "/explorador",
+    title: "Explorador de Arquivos",
+    desc: "subir zips · indexar XMLs · explorar por tipo",
+    num: "novo",
+    numLabel: "ferramenta",
+    glow: true,
+    icon: "folder",
   },
 ]);
 
@@ -245,6 +254,19 @@ const branchPaths = [
             >
               <rect x="3" y="4" width="18" height="18" rx="2" />
               <path d="M16 2v4M8 2v4M3 10h18" />
+            </svg>
+            <svg
+              v-else-if="c.icon === 'folder'"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path
+                d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
+              />
+              <path d="M3 11h18" />
             </svg>
             <svg
               v-else

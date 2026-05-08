@@ -1,0 +1,517 @@
+"""Router do Chain Walk v2 — timeline mensal de S-1210."""
+from __future__ import annotations
+
+from typing import Any
+
+import psycopg2
+import psycopg2.extras
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
+
+from . import db, storage
+
+router = APIRouter(prefix="/api/explorador/timeline", tags=["chain-walk"])
+
+
+def _serialize(rows: list[dict]) -> list[dict]:
+    out = []
+    for r in rows:
+        d = dict(r)
+        for k, v in list(d.items()):
+            if hasattr(v, "isoformat"):
+                d[k] = v.isoformat()
+        out.append(d)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# 1) Lista meses disponíveis
+# ---------------------------------------------------------------------------
+@router.get("/meses")
+def listar_meses(empresa_id: int):
+    """Lista todos os perApur que têm timeline_mes para a empresa."""
+    with db.cursor() as c:
+        c.execute(
+            """
+            SELECT m.id, m.per_apur, m.head_envio_id, m.criado_em,
+                   COUNT(e.id) FILTER (WHERE e.tipo='envio_massa')      AS envios_massa,
+                   COUNT(e.id)                                           AS envios_total,
+                   COALESCE(SUM(e.total_sucesso), 0)                     AS total_sucesso,
+                   COALESCE(SUM(e.total_erro), 0)                        AS total_erro
+              FROM timeline_mes m
+              LEFT JOIN timeline_envio e ON e.timeline_mes_id = m.id
+             WHERE m.empresa_id = %s
+             GROUP BY m.id
+             ORDER BY m.per_apur DESC
+            """,
+            (empresa_id,),
+        )
+        rows = c.fetchall()
+    return {"ok": True, "items": _serialize(rows)}
+
+
+# ---------------------------------------------------------------------------
+# 2) Régua de um mês específico
+# ---------------------------------------------------------------------------
+@router.get("")
+def regua_mes(empresa_id: int, per_apur: str = Query(..., min_length=7, max_length=7)):
+    with db.cursor() as c:
+        c.execute(
+            "SELECT * FROM timeline_mes WHERE empresa_id=%s AND per_apur=%s",
+            (empresa_id, per_apur),
+        )
+        m = c.fetchone()
+        if not m:
+            raise HTTPException(404, "mês sem timeline ainda — suba um zip desse perApur")
+        c.execute(
+            """
+            SELECT id, sequencia, tipo, status,
+                   iniciado_em, finalizado_em,
+                   total_tentados, total_sucesso, total_erro, resumo
+              FROM timeline_envio
+             WHERE timeline_mes_id = %s
+             ORDER BY sequencia ASC
+            """,
+            (m["id"],),
+        )
+        envios = c.fetchall()
+    return {
+        "ok": True,
+        "timeline_mes": _serialize([m])[0],
+        "envios": _serialize(envios),
+    }
+
+
+# ---------------------------------------------------------------------------
+# 3) Estado de um envio (CPFs e status — para o grid)
+# ---------------------------------------------------------------------------
+@router.get("/envio/{envio_id}/estado")
+def estado_envio(envio_id: int):
+    with db.cursor() as c:
+        c.execute(
+            """
+            SELECT e.*, m.per_apur, m.empresa_id
+              FROM timeline_envio e
+              JOIN timeline_mes m ON m.id = e.timeline_mes_id
+             WHERE e.id = %s
+            """,
+            (envio_id,),
+        )
+        e = c.fetchone()
+        if not e:
+            raise HTTPException(404, "envio não encontrado")
+
+        if e["tipo"] == "zip_inicial":
+            # estado = todos os S-1210 do mês cuja origem é esse envio
+            c.execute(
+                """
+                SELECT ev.id, ev.cpf, ev.nr_recibo, ev.referenciado_recibo,
+                       ev.retificado_por_id,
+                       (ev.retificado_por_id IS NULL) AS is_head
+                  FROM explorador_eventos ev
+                 WHERE ev.tipo_evento = 'S-1210'
+                   AND ev.per_apur = %s
+                   AND ev.origem_envio_id = %s
+                 ORDER BY ev.cpf
+                """,
+                (e["per_apur"], envio_id),
+            )
+            evts = c.fetchall()
+            items = [
+                {
+                    "cpf": r["cpf"],
+                    "status": "sucesso",
+                    "versao_id": r["id"],
+                    "nr_recibo": r["nr_recibo"],
+                    "is_head": r["is_head"],
+                }
+                for r in evts
+            ]
+            totais = {
+                "sucesso": len(items),
+                "erro_esocial": 0,
+                "falha_rede": 0,
+                "rejeitado_local": 0,
+            }
+        else:
+            # envio_massa ou individual — lê itens
+            c.execute(
+                """
+                SELECT id, cpf, status, versao_anterior_id, versao_nova_id,
+                       nr_recibo_anterior, nr_recibo_novo,
+                       erro_codigo, erro_mensagem, criado_em, duracao_ms
+                  FROM timeline_envio_item
+                 WHERE timeline_envio_id = %s
+                 ORDER BY cpf
+                """,
+                (envio_id,),
+            )
+            items_raw = c.fetchall()
+            items = _serialize(items_raw)
+            totais = {"sucesso": 0, "erro_esocial": 0, "falha_rede": 0, "rejeitado_local": 0}
+            for it in items:
+                if it["status"] in totais:
+                    totais[it["status"]] += 1
+    return {
+        "ok": True,
+        "envio": _serialize([e])[0],
+        "items": items,
+        "totais": totais,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 4) Cadeia completa de um (cpf, per_apur, tipo_evento)
+# ---------------------------------------------------------------------------
+@router.get("/cadeia")
+def cadeia_cpf(
+    empresa_id: int,
+    cpf: str,
+    per_apur: str,
+    tipo_evento: str = "S-1210",
+):
+    with db.cursor() as c:
+        c.execute(
+            """
+            SELECT ev.id, ev.cpf, ev.per_apur, ev.tipo_evento,
+                   ev.nr_recibo, ev.referenciado_recibo AS nr_recibo_anterior,
+                   ev.retificado_por_id, ev.origem_envio_id,
+                   (ev.retificado_por_id IS NULL) AS is_head,
+                   te.sequencia AS envio_sequencia, te.tipo AS envio_tipo,
+                   te.iniciado_em
+              FROM explorador_eventos ev
+              LEFT JOIN timeline_envio te ON te.id = ev.origem_envio_id
+              JOIN empresa_zips_brutos z ON z.id = ev.zip_id
+             WHERE ev.tipo_evento = %s
+               AND ev.cpf = %s
+               AND ev.per_apur = %s
+               AND z.empresa_id = %s
+             ORDER BY te.sequencia NULLS FIRST, ev.id
+            """,
+            (tipo_evento, cpf, per_apur, empresa_id),
+        )
+        versoes = c.fetchall()
+
+        # tentativas (sucesso + erros) — só vão existir após envios futuros
+        c.execute(
+            """
+            SELECT it.id, it.timeline_envio_id, te.sequencia,
+                   it.status, it.criado_em,
+                   it.nr_recibo_anterior, it.nr_recibo_novo,
+                   it.erro_codigo, it.erro_mensagem,
+                   (it.xml_enviado_oid IS NOT NULL) AS xml_enviado_disponivel,
+                   (it.xml_retorno_oid IS NOT NULL) AS xml_retorno_disponivel
+              FROM timeline_envio_item it
+              JOIN timeline_envio te ON te.id = it.timeline_envio_id
+              JOIN timeline_mes  tm  ON tm.id = te.timeline_mes_id
+             WHERE tm.empresa_id = %s
+               AND tm.per_apur   = %s
+               AND it.cpf        = %s
+               AND it.tipo_evento = %s
+             ORDER BY te.sequencia, it.id
+            """,
+            (empresa_id, per_apur, cpf, tipo_evento),
+        )
+        tentativas = c.fetchall()
+    return {
+        "ok": True,
+        "cpf": cpf,
+        "per_apur": per_apur,
+        "tipo_evento": tipo_evento,
+        "versoes": _serialize(versoes),
+        "tentativas": _serialize(tentativas),
+    }
+
+
+# ---------------------------------------------------------------------------
+# 5) Download de XML enviado / retorno por tentativa (item)
+# ---------------------------------------------------------------------------
+download_router = APIRouter(prefix="/api/explorador", tags=["chain-walk-download"])
+
+
+def _stream_lo(oid: int, filename: str):
+    conn = db.connect()
+
+    def _gen():
+        try:
+            yield from storage.iter_lo_bytes(conn, int(oid))
+        finally:
+            try:
+                conn.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return StreamingResponse(_gen(), media_type="application/xml", headers=headers)
+
+
+@download_router.get("/tentativa/{item_id}/xml-enviado")
+def baixar_xml_enviado(item_id: int):
+    with db.cursor() as c:
+        c.execute(
+            "SELECT cpf, xml_enviado_oid FROM timeline_envio_item WHERE id=%s",
+            (item_id,),
+        )
+        row = c.fetchone()
+    if not row:
+        raise HTTPException(404, "tentativa nao encontrada")
+    if row.get("xml_enviado_oid") is None:
+        raise HTTPException(404, "xml_enviado nao disponivel para esta tentativa")
+    return _stream_lo(row["xml_enviado_oid"], f"enviado_{row['cpf']}_item{item_id}.xml")
+
+
+@download_router.get("/tentativa/{item_id}/xml-retorno")
+def baixar_xml_retorno(item_id: int):
+    with db.cursor() as c:
+        c.execute(
+            "SELECT cpf, xml_retorno_oid FROM timeline_envio_item WHERE id=%s",
+            (item_id,),
+        )
+        row = c.fetchone()
+    if not row:
+        raise HTTPException(404, "tentativa nao encontrada")
+    if row.get("xml_retorno_oid") is None:
+        raise HTTPException(404, "xml_retorno nao disponivel para esta tentativa")
+    return _stream_lo(row["xml_retorno_oid"], f"retorno_{row['cpf']}_item{item_id}.xml")
+
+
+# ---------------------------------------------------------------------------
+# 6) S-1210 Anual Overview — para a S1210AnualView (pagina anual)
+# ---------------------------------------------------------------------------
+s1210_repo_router = APIRouter(prefix="/api/s1210-repo", tags=["s1210-anual"])
+
+
+@s1210_repo_router.get("/anual/overview")
+def s1210_anual_overview(ano: int, empresa_id: int):
+    """Overview anual S-1210 (12 meses x 1 lote MVP).
+
+    Lógica espelhada do V1 (`v_s1210_contadores`):
+      - universo (total) = CPFs HEAD do mes (1 row por CPF)
+      - status corrente  = ULTIMO envio por CPF (DISTINCT ON cpf ORDER BY criado_em DESC)
+      - conta ok/erro/enviando/pendente baseado no status do ultimo envio
+      - tentativas anteriores nao inflam contagem
+
+    Mapeamento status timeline_envio_item -> contador:
+      sucesso              -> ok
+      erro_esocial / erro* -> erro
+      enviando/processando -> enviando
+      demais / NULL        -> pendente
+
+    empresa_id (V1):
+      1 = APPA      -> Supabase
+      2 = SOLUCOES  -> Local (internal_empresa_id=1)
+    """
+    from . import tenant
+    cfg = tenant.get_db_config_for_empresa(empresa_id)
+    internal_id = tenant.internal_empresa_id(empresa_id)
+
+    meses_out = []
+    conn = psycopg2.connect(**cfg)
+    try:
+        for m in range(1, 13):
+            per = f"{ano}-{m:02d}"
+            total = 0
+            ok = erro = enviando = pendente = 0
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as c:
+                try:
+                    c.execute(
+                        """
+                        WITH scope AS (
+                            SELECT DISTINCT ev.cpf
+                              FROM explorador_eventos ev
+                              JOIN empresa_zips_brutos z ON z.id=ev.zip_id
+                             WHERE z.empresa_id=%s
+                               AND ev.tipo_evento='S-1210'
+                               AND ev.per_apur=%s
+                               AND ev.retificado_por_id IS NULL
+                               AND ev.cpf IS NOT NULL
+                        ),
+                        ult AS (
+                            SELECT DISTINCT ON (it.cpf) it.cpf, it.status, it.erro_codigo
+                              FROM timeline_envio_item it
+                              JOIN timeline_envio te ON te.id=it.timeline_envio_id
+                              JOIN timeline_mes tm   ON tm.id=te.timeline_mes_id
+                             WHERE tm.empresa_id=%s
+                               AND tm.per_apur=%s
+                               AND it.tipo_evento='S-1210'
+                             ORDER BY it.cpf, it.criado_em DESC, it.id DESC
+                        )
+                        SELECT
+                          COUNT(*)                                                      AS total,
+                          COUNT(*) FILTER (WHERE u.status = 'sucesso')                  AS ok,
+                          COUNT(*) FILTER (WHERE u.status LIKE 'erro%%')                AS erro,
+                          COUNT(*) FILTER (WHERE u.status IN ('enviando','processando')) AS enviando,
+                          COUNT(*) FILTER (WHERE u.status IS NULL
+                                             OR u.status NOT IN ('sucesso','enviando','processando')
+                                             AND u.status NOT LIKE 'erro%%')           AS pendente,
+                          COUNT(*) FILTER (WHERE u.status LIKE 'erro%%'
+                                             AND u.erro_codigo IN ('401','459'))        AS recibo_retificado,
+                          COUNT(*) FILTER (WHERE u.status LIKE 'erro%%'
+                                             AND u.erro_codigo = '202')                 AS aceito_com_aviso
+                          FROM scope s
+                          LEFT JOIN ult u ON u.cpf = s.cpf
+                        """,
+                        (internal_id, per, internal_id, per),
+                    )
+                    row = c.fetchone() or {}
+                    total = int(row.get("total") or 0)
+                    ok = int(row.get("ok") or 0)
+                    erro = int(row.get("erro") or 0)
+                    enviando = int(row.get("enviando") or 0)
+                    pendente = int(row.get("pendente") or 0)
+                    recibo_retificado = int(row.get("recibo_retificado") or 0)
+                    aceito_com_aviso = int(row.get("aceito_com_aviso") or 0)
+                except Exception:
+                    conn.rollback()
+                    recibo_retificado = 0
+                    aceito_com_aviso = 0
+
+            if total == 0:
+                estado = "sem_dados"
+            elif enviando > 0:
+                estado = "processando"
+            elif pendente > 0 and ok == 0 and erro == 0:
+                estado = "pronto_para_processar"
+            elif erro > 0:
+                estado = "concluido_com_erros"
+            elif ok > 0 and pendente == 0:
+                estado = "concluido"
+            else:
+                estado = "pronto_para_processar"
+
+            meses_out.append({
+                "per_apur": per,
+                "lotes": [{
+                    "per_apur": per,
+                    "lote_num": 1,
+                    "total": total,
+                    "ok": ok,
+                    "erro": erro,
+                    "enviando": enviando,
+                    "pendente": pendente,
+                    "na": 0,
+                    "recibo_retificado": recibo_retificado,
+                    "aceito_com_aviso": aceito_com_aviso,
+                    "tem_xlsx": False,
+                    "estado": estado,
+                }],
+            })
+    finally:
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
+    return {"ano": ano, "empresa_id": empresa_id, "meses": meses_out}
+
+
+@s1210_repo_router.get("/cpfs-do-mes")
+def s1210_cpfs_do_mes(per_apur: str, empresa_id: int, lote_num: int = 1):
+    """Lista CPFs S-1210 HEAD do mes (1 row por CPF), com status do ultimo envio.
+
+    Resposta compativel com o V1 (`/api/s1210-repo/cpfs-do-mes`):
+      { empresa_id, per_apur, total, cpfs: [...] }
+    Cada CPF traz status normalizado: ok|erro|enviando|na|pendente.
+    """
+    from . import tenant
+    cfg = tenant.get_db_config_for_empresa(empresa_id)
+    internal_id = tenant.internal_empresa_id(empresa_id)
+
+    cpfs_rows: list[dict] = []
+    ultimo_por_cpf: dict[str, dict] = {}
+    conn = psycopg2.connect(**cfg)
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as c:
+            try:
+                c.execute(
+                    """
+                    SELECT DISTINCT ON (ev.cpf)
+                           ev.id, ev.cpf, ev.nr_recibo, ev.referenciado_recibo,
+                           ev.dt_processamento
+                      FROM explorador_eventos ev
+                      JOIN empresa_zips_brutos z ON z.id=ev.zip_id
+                     WHERE z.empresa_id=%s
+                       AND ev.tipo_evento='S-1210'
+                       AND ev.per_apur=%s
+                       AND ev.retificado_por_id IS NULL
+                       AND ev.cpf IS NOT NULL
+                     ORDER BY ev.cpf, ev.dt_processamento DESC NULLS LAST, ev.id DESC
+                    """,
+                    (internal_id, per_apur),
+                )
+                cpfs_rows = list(c.fetchall())
+            except Exception:
+                conn.rollback()
+                cpfs_rows = []
+
+            try:
+                c.execute(
+                    """
+                    SELECT DISTINCT ON (it.cpf)
+                           it.cpf, it.status, it.nr_recibo_anterior AS nr_recibo_usado, it.nr_recibo_novo,
+                           it.erro_codigo, it.erro_mensagem,
+                           it.criado_em, it.timeline_envio_id
+                      FROM timeline_envio_item it
+                      JOIN timeline_envio te ON te.id=it.timeline_envio_id
+                      JOIN timeline_mes tm ON tm.id=te.timeline_mes_id
+                     WHERE tm.empresa_id=%s AND tm.per_apur=%s
+                       AND it.tipo_evento='S-1210'
+                     ORDER BY it.cpf, it.criado_em DESC, it.id DESC
+                    """,
+                    (internal_id, per_apur),
+                )
+                for r in c.fetchall():
+                    ultimo_por_cpf[r["cpf"]] = dict(r)
+            except Exception:
+                conn.rollback()
+    finally:
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _norm_status(s: str | None) -> str:
+        if s is None:
+            return "pendente"
+        if s == "sucesso":
+            return "ok"
+        if s.startswith("erro"):
+            return "erro"
+        if s in ("enviando", "processando"):
+            return "enviando"
+        if s == "na":
+            return "na"
+        return "pendente"
+
+    cpfs_out = []
+    for r in cpfs_rows:
+        u = ultimo_por_cpf.get(r["cpf"])
+        criado = u["criado_em"].isoformat() if u and hasattr(u.get("criado_em"), "isoformat") else (u and u.get("criado_em")) or None
+        cpfs_out.append({
+            "cpf": r["cpf"],
+            "nome": None,
+            "matricula": None,
+            "lote_num": lote_num,
+            "row_number": None,
+            "tem_xml": bool(r.get("nr_recibo")),
+            "nr_recibo_xml": r.get("nr_recibo"),
+            "status": _norm_status(u["status"] if u else None),
+            "nr_recibo_usado": (u or {}).get("nr_recibo_usado"),
+            "nr_recibo_novo": (u or {}).get("nr_recibo_novo"),
+            "erro_codigo": (u or {}).get("erro_codigo"),
+            "descricao_resposta": (u or {}).get("erro_mensagem"),
+            "erro_descricao": (u or {}).get("erro_mensagem"),
+            "enviado_em": criado,
+        })
+
+    return {
+        "ok": True,
+        "per_apur": per_apur,
+        "empresa_id": empresa_id,
+        "lote_num": lote_num,
+        "total": len(cpfs_out),
+        "cpfs": cpfs_out,
+    }

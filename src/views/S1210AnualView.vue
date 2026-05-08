@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { pyApi } from "@/services/pythonApi";
+import { s1210AnualOverview } from "@/services/exploradorApi";
 
 type Estado =
   | "sem_dados"
@@ -20,6 +21,8 @@ interface Celula {
   enviando: number;
   pendente: number;
   na: number;
+  recibo_retificado?: number;
+  aceito_com_aviso?: number;
   tem_xlsx: boolean;
   estado: Estado;
 }
@@ -85,6 +88,8 @@ const resumo = computed(() => {
     na: 0,
     mesesAtivos: 0,
     mesesTotal: 12,
+    recibo_retificado: 0,
+    aceito_com_aviso: 0,
   };
   if (!overview.value) return out;
   out.mesesTotal = overview.value.meses.length || 12;
@@ -97,6 +102,8 @@ const resumo = computed(() => {
       out.pendente += c.pendente;
       out.processando += c.enviando;
       out.na += c.na ?? 0;
+      out.recibo_retificado += c.recibo_retificado ?? 0;
+      out.aceito_com_aviso += c.aceito_com_aviso ?? 0;
       if (
         c.total > 0 ||
         c.ok > 0 ||
@@ -277,10 +284,7 @@ async function carregar() {
   loading.value = true;
   error.value = null;
   try {
-    overview.value = await pyApi.get<OverviewAnual>(
-      "/api/s1210-repo/anual/overview",
-      { query: { ano: ano.value, empresa_id: empresaId.value } },
-    );
+    overview.value = await s1210AnualOverview(ano.value, empresaId.value);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Falha ao carregar S-1210";
     error.value = msg;
@@ -426,6 +430,22 @@ onMounted(() => {
         <div class="kpi-label">Processando</div>
         <div class="kpi-value">{{ fmt(resumo.processando) }}</div>
       </div>
+      <div
+        v-if="resumo.recibo_retificado > 0"
+        class="kpi-card kpi-flag kpi-flag--retif"
+        title="CPFs cuja resposta do eSocial foi 401-459: o recibo do S-1200 referenciado foi retificado externamente. Necessario reextrair recibos atualizados (ZIP novo) antes de retentar."
+      >
+        <div class="kpi-label">🔁 Recibo retificado</div>
+        <div class="kpi-value retif">{{ fmt(resumo.recibo_retificado) }}</div>
+      </div>
+      <div
+        v-if="resumo.aceito_com_aviso > 0"
+        class="kpi-card kpi-flag kpi-flag--aviso"
+        title="CPFs com codigo 202: aceito pelo eSocial com advertencia (geralmente rubrica 1863 deducao dependente). Nao precisa reenviar."
+      >
+        <div class="kpi-label">⚠ Aceito c/ aviso</div>
+        <div class="kpi-value aviso">{{ fmt(resumo.aceito_com_aviso) }}</div>
+      </div>
     </div>
 
     <!-- TIMELINE 12x4 -->
@@ -523,6 +543,26 @@ onMounted(() => {
                 >
                 <span v-if="(celulaDoLote(mes, n)!.na ?? 0) > 0" class="na"
                   ><b>{{ fmt(celulaDoLote(mes, n)!.na) }}</b> N/A</span
+                >
+              </div>
+              <div
+                v-if="
+                  (celulaDoLote(mes, n)!.recibo_retificado ?? 0) > 0 ||
+                  (celulaDoLote(mes, n)!.aceito_com_aviso ?? 0) > 0
+                "
+                class="cell-flags"
+              >
+                <span
+                  v-if="(celulaDoLote(mes, n)!.recibo_retificado ?? 0) > 0"
+                  class="cell-flag cell-flag--retif"
+                  :title="`${celulaDoLote(mes, n)!.recibo_retificado} CPF(s) com recibo retificado externamente (eSocial 401-459). Reextrair via ZIP novo.`"
+                  >🔁 {{ celulaDoLote(mes, n)!.recibo_retificado }} retif</span
+                >
+                <span
+                  v-if="(celulaDoLote(mes, n)!.aceito_com_aviso ?? 0) > 0"
+                  class="cell-flag cell-flag--aviso"
+                  :title="`${celulaDoLote(mes, n)!.aceito_com_aviso} CPF(s) aceitos com advertencia (codigo 202).`"
+                  >⚠ {{ celulaDoLote(mes, n)!.aceito_com_aviso }} aviso</span
                 >
               </div>
               <div
@@ -1325,5 +1365,50 @@ onMounted(() => {
   font-style: italic;
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
   text-shadow: 0 0 6px rgba(240, 209, 229, 0.3);
+}
+
+/* Flags semanticas (recibo retificado / aceito c/ aviso) */
+.cell-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.cell-flag {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  cursor: help;
+}
+.cell-flag--retif {
+  background: rgba(255, 130, 80, 0.18);
+  color: #ffaa70;
+  border: 1px solid rgba(255, 130, 80, 0.4);
+  box-shadow: 0 0 8px rgba(255, 130, 80, 0.25);
+}
+.cell-flag--aviso {
+  background: rgba(255, 200, 80, 0.18);
+  color: #ffd060;
+  border: 1px solid rgba(255, 200, 80, 0.35);
+}
+.kpi-card.kpi-flag {
+  cursor: help;
+}
+.kpi-flag--retif {
+  border-color: rgba(255, 130, 80, 0.4) !important;
+  background: rgba(255, 130, 80, 0.06) !important;
+}
+.kpi-flag--aviso {
+  border-color: rgba(255, 200, 80, 0.35) !important;
+  background: rgba(255, 200, 80, 0.06) !important;
+}
+.kpi-value.retif {
+  color: #ffaa70;
+}
+.kpi-value.aviso {
+  color: #ffd060;
 }
 </style>

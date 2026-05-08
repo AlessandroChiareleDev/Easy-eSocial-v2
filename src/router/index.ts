@@ -73,6 +73,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: "Logs de Sistema" },
       },
       {
+        path: "explorador",
+        name: "explorador",
+        component: () => import("@/views/ExploradorView.vue"),
+        meta: { title: "Explorador de Arquivos" },
+      },
+      {
         path: "problemas",
         name: "problemas",
         component: () => import("@/views/ProblemasView.vue"),

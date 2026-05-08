@@ -27,6 +27,16 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (p) => p.replace(/^\/py-api/, ""),
       },
+      // Backend NOVO do Explorador (FastAPI :8001)
+      "/explorador-api": {
+        target: "http://localhost:8001",
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/explorador-api/, ""),
+        // uploads de 1+ GB podem levar minutos no servidor depois do
+        // upload acabar (SHA256 + escrita no Large Object). Sem timeout.
+        timeout: 0,
+        proxyTimeout: 0,
+      },
     },
   },
   build: {

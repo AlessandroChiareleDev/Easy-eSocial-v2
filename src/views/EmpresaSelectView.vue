@@ -31,8 +31,8 @@ function fmtCnpj(c: string): string {
     <header class="head">
       <h1>Escolha a empresa</h1>
       <p class="sub">
-        Cada empresa tem seu próprio schema isolado no banco. Os dados que
-        você vai ver dependem da escolha aqui.
+        Cada empresa tem seu próprio schema isolado no banco. Os dados que você
+        vai ver dependem da escolha aqui.
       </p>
       <p v-if="auth.user" class="who">
         Logado como <strong>{{ auth.user.email }}</strong>
@@ -63,7 +63,9 @@ function fmtCnpj(c: string): string {
           </span>
         </div>
         <div class="logo">{{ (emp.razao_social || emp.cnpj).charAt(0) }}</div>
-        <h2 class="nome">{{ emp.razao_social || emp.schema_name || emp.cnpj }}</h2>
+        <h2 class="nome">
+          {{ emp.razao_social || emp.schema_name || emp.cnpj }}
+        </h2>
         <div class="cnpj">CNPJ {{ fmtCnpj(emp.cnpj) }}</div>
         <div class="meta">schema: {{ emp.schema_name || "—" }}</div>
         <span class="cta">Entrar →</span>

@@ -70,7 +70,10 @@ export const useAuthStore = defineStore("auth", () => {
   const isSuperAdmin = computed(() => !!user.value?.super_admin);
   const initials = computed(() => {
     const src = user.value?.nome || user.value?.email || "";
-    const parts = src.trim().split(/[\s@.]+/).slice(0, 2);
+    const parts = src
+      .trim()
+      .split(/[\s@.]+/)
+      .slice(0, 2);
     return parts.map((p) => p[0]?.toUpperCase() ?? "").join("") || "??";
   });
 

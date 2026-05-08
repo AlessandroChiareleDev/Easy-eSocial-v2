@@ -45,7 +45,9 @@ async function carregar() {
 
 async function remover(c: Certificado) {
   const cn = c.titular || c.cnpj;
-  if (!confirm(`Remover certificado de ${cn}? Essa ação não pode ser desfeita.`)) {
+  if (
+    !confirm(`Remover certificado de ${cn}? Essa ação não pode ser desfeita.`)
+  ) {
     return;
   }
   try {
@@ -134,7 +136,9 @@ onMounted(() => {
           <li v-for="c in inativos" :key="c.id">
             <div class="hist-line">
               <span class="hist-titular">{{ c.titular || c.cnpj }}</span>
-              <span class="hist-validade">até {{ fmtDate(c.validade_fim) }}</span>
+              <span class="hist-validade"
+                >até {{ fmtDate(c.validade_fim) }}</span
+              >
               <button class="btn-del-mini" @click="remover(c)">excluir</button>
             </div>
           </li>
@@ -198,7 +202,11 @@ onMounted(() => {
   font-style: italic;
 }
 .cert-card {
-  background: linear-gradient(160deg, rgba(30, 41, 59, 0.85), rgba(15, 23, 42, 0.9));
+  background: linear-gradient(
+    160deg,
+    rgba(30, 41, 59, 0.85),
+    rgba(15, 23, 42, 0.9)
+  );
   border: 1px solid rgba(34, 197, 94, 0.4);
   border-radius: 14px;
   padding: 24px;

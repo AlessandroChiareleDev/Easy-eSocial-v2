@@ -39,6 +39,10 @@ sleep 2
 sudo systemctl --no-pager --lines=10 status easy-esocial.service || true
 
 echo "==> 7. Smoke"
-curl -sf https://v2.easyesocial.com.br/api/health || echo "    !! /api/health falhou"
+# Antes do cutover, V2 só responde local. Depois do cutover, no domínio público.
+curl -sf http://127.0.0.1:8001/health || echo "    !! /health local falhou"
+curl -sfk https://easyesocial.com.br/api/health > /dev/null 2>&1 \
+    && echo "    OK público" \
+    || echo "    (público ainda não ativo — rode cutover_v1_to_v2.sh)"
 
 echo "==> Deploy OK"

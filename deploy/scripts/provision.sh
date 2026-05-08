@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# Easy eSocial V2 — provisionamento inicial da VPS Hostinger
+# Easy eSocial V2 — provisionamento inicial da VPS
 # Uso (como root): bash deploy/scripts/provision.sh
-# Roda 1 vez. Depois de pronto, use deploy.sh pra updates.
+# Roda 1 vez. Depois de pronto:
+#   - bash deploy/scripts/deploy.sh         (build + restart V2)
+#   - bash deploy/scripts/cutover_v1_to_v2.sh  (troca nginx p/ V2 no MESMO domínio)
 
 set -euo pipefail
 
 APP_DIR=/opt/easy-esocial
 APP_USER=esocial
-DOMAIN=v2.easyesocial.com.br
+DOMAIN=easyesocial.com.br
 REPO_URL="${REPO_URL:-https://github.com/SEU_USUARIO/Easy-eSocial-v2.git}"
 
 echo "==> 1. Pacotes do sistema"
@@ -53,18 +55,17 @@ install -m 644 "$APP_DIR/repo/deploy/easy-esocial.service" /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable easy-esocial.service
 
-echo "==> 9. nginx site"
-install -m 644 "$APP_DIR/repo/deploy/nginx/$DOMAIN.conf" "/etc/nginx/sites-available/$DOMAIN"
-ln -sf "/etc/nginx/sites-available/$DOMAIN" "/etc/nginx/sites-enabled/$DOMAIN"
-
-echo "==> 10. SSL (Certbot)"
-echo "    Rode manualmente depois que o DNS apontar para esta VPS:"
-echo "    certbot --nginx -d $DOMAIN"
+echo "==> 9. nginx config V2 (NÃO ativa ainda — cutover é passo separado)"
+echo "    Config V2 estará em: /etc/nginx/sites-available/$DOMAIN.v2.conf"
+echo "    NÃO substitui o V1 ativo agora — só durante o cutover."
+install -m 644 "$APP_DIR/repo/deploy/nginx/$DOMAIN.conf" "/etc/nginx/sites-available/$DOMAIN.v2.conf"
 
 echo
-echo "==> Próximos passos"
-echo "  1) Edite .env: $APP_DIR/backend/.env"
-echo "  2) certbot --nginx -d $DOMAIN"
-echo "  3) bash deploy/scripts/deploy.sh   (faz pull + build + restart)"
-echo "  4) systemctl status easy-esocial"
-echo "  5) curl https://$DOMAIN/api/health"
+echo "==> Próximos passos (em ordem)"
+echo "  1) Edite .env:  nano $APP_DIR/backend/.env"
+echo "  2) Build+start V2:  bash $APP_DIR/repo/deploy/scripts/deploy.sh"
+echo "                      (V2 sobe na :8001 SEM afetar V1)"
+echo "  3) Smoke V2:    curl http://127.0.0.1:8001/health"
+echo "  4) CUTOVER (troca nginx do V1 → V2 no mesmo domínio):"
+echo "         bash $APP_DIR/repo/deploy/scripts/cutover_v1_to_v2.sh"
+echo "  5) Se der ruim:  bash $APP_DIR/repo/deploy/scripts/rollback_to_v1.sh"

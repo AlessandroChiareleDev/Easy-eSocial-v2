@@ -58,7 +58,9 @@ async function submit() {
     ok.value = `Certificado de ${res.titular} aceito (válido até ${new Date(res.validade).toLocaleDateString("pt-BR")}).`;
     file.value = null;
     senha.value = "";
-    const fileInput = document.getElementById("cert-file") as HTMLInputElement | null;
+    const fileInput = document.getElementById(
+      "cert-file",
+    ) as HTMLInputElement | null;
     if (fileInput) fileInput.value = "";
     emit("uploaded");
   } catch (e) {

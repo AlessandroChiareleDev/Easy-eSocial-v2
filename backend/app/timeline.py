@@ -317,57 +317,106 @@ def s1210_anual_overview(ano: int, empresa_id: int):
             per = f"{ano}-{m:02d}"
             total = 0
             ok = erro = enviando = pendente = 0
+            recibo_retificado = 0
+            aceito_com_aviso = 0
+            na = 0
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as c:
+                # 1) Tenta caminho LEGACY V1: s1210_cpf_scope (universo) + s1210_cpf_envios (status)
+                legacy_used = False
                 try:
                     c.execute(
                         """
                         WITH scope AS (
-                            SELECT DISTINCT ev.cpf
-                              FROM explorador_eventos ev
-                             WHERE ev.tipo_evento='S-1210'
-                               AND ev.per_apur=%s
-                               AND ev.retificado_por_id IS NULL
-                               AND ev.cpf IS NOT NULL
+                            SELECT DISTINCT cpf
+                              FROM s1210_cpf_scope
+                             WHERE empresa_id=%s AND per_apur=%s AND cpf IS NOT NULL
                         ),
                         ult AS (
-                            SELECT DISTINCT ON (it.cpf) it.cpf, it.status, it.erro_codigo
-                              FROM timeline_envio_item it
-                              JOIN timeline_envio te ON te.id=it.timeline_envio_id
-                              JOIN timeline_mes tm   ON tm.id=te.timeline_mes_id
-                             WHERE tm.empresa_id=%s
-                               AND tm.per_apur=%s
-                               AND it.tipo_evento='S-1210'
-                             ORDER BY it.cpf, it.criado_em DESC, it.id DESC
+                            SELECT DISTINCT ON (cpf) cpf, status, codigo_resposta
+                              FROM s1210_cpf_envios
+                             WHERE empresa_id=%s AND per_apur=%s
+                             ORDER BY cpf, enviado_em DESC NULLS LAST, id DESC
                         )
                         SELECT
                           COUNT(*)                                                      AS total,
-                          COUNT(*) FILTER (WHERE u.status = 'sucesso')                  AS ok,
+                          COUNT(*) FILTER (WHERE u.status IN ('ok','ok_recuperado'))    AS ok,
                           COUNT(*) FILTER (WHERE u.status LIKE 'erro%%')                AS erro,
                           COUNT(*) FILTER (WHERE u.status IN ('enviando','processando')) AS enviando,
-                          COUNT(*) FILTER (WHERE u.status IS NULL
-                                             OR u.status NOT IN ('sucesso','enviando','processando')
-                                             AND u.status NOT LIKE 'erro%%')           AS pendente,
+                          COUNT(*) FILTER (WHERE u.status = 'na')                       AS na,
+                          COUNT(*) FILTER (WHERE u.status IS NULL)                      AS pendente,
                           COUNT(*) FILTER (WHERE u.status LIKE 'erro%%'
-                                             AND u.erro_codigo IN ('401','459'))        AS recibo_retificado,
+                                             AND u.codigo_resposta IN ('401','459'))    AS recibo_retificado,
                           COUNT(*) FILTER (WHERE u.status LIKE 'erro%%'
-                                             AND u.erro_codigo = '202')                 AS aceito_com_aviso
+                                             AND u.codigo_resposta = '202')             AS aceito_com_aviso
                           FROM scope s
                           LEFT JOIN ult u ON u.cpf = s.cpf
                         """,
-                        (per, internal_id, per),
+                        (internal_id, per, internal_id, per),
                     )
                     row = c.fetchone() or {}
                     total = int(row.get("total") or 0)
-                    ok = int(row.get("ok") or 0)
-                    erro = int(row.get("erro") or 0)
-                    enviando = int(row.get("enviando") or 0)
-                    pendente = int(row.get("pendente") or 0)
-                    recibo_retificado = int(row.get("recibo_retificado") or 0)
-                    aceito_com_aviso = int(row.get("aceito_com_aviso") or 0)
+                    if total > 0:
+                        legacy_used = True
+                        ok = int(row.get("ok") or 0)
+                        erro = int(row.get("erro") or 0)
+                        enviando = int(row.get("enviando") or 0)
+                        na = int(row.get("na") or 0)
+                        pendente = int(row.get("pendente") or 0)
+                        recibo_retificado = int(row.get("recibo_retificado") or 0)
+                        aceito_com_aviso = int(row.get("aceito_com_aviso") or 0)
                 except Exception:
                     conn.rollback()
-                    recibo_retificado = 0
-                    aceito_com_aviso = 0
+
+                # 2) Fallback caminho V2: explorador_eventos + timeline_envio_item
+                if not legacy_used:
+                    try:
+                        c.execute(
+                            """
+                            WITH scope AS (
+                                SELECT DISTINCT ev.cpf
+                                  FROM explorador_eventos ev
+                                 WHERE ev.tipo_evento='S-1210'
+                                   AND ev.per_apur=%s
+                                   AND ev.retificado_por_id IS NULL
+                                   AND ev.cpf IS NOT NULL
+                            ),
+                            ult AS (
+                                SELECT DISTINCT ON (it.cpf) it.cpf, it.status, it.erro_codigo
+                                  FROM timeline_envio_item it
+                                  JOIN timeline_envio te ON te.id=it.timeline_envio_id
+                                  JOIN timeline_mes tm   ON tm.id=te.timeline_mes_id
+                                 WHERE tm.empresa_id=%s
+                                   AND tm.per_apur=%s
+                                   AND it.tipo_evento='S-1210'
+                                 ORDER BY it.cpf, it.criado_em DESC, it.id DESC
+                            )
+                            SELECT
+                              COUNT(*)                                                      AS total,
+                              COUNT(*) FILTER (WHERE u.status = 'sucesso')                  AS ok,
+                              COUNT(*) FILTER (WHERE u.status LIKE 'erro%%')                AS erro,
+                              COUNT(*) FILTER (WHERE u.status IN ('enviando','processando')) AS enviando,
+                              COUNT(*) FILTER (WHERE u.status IS NULL
+                                                 OR u.status NOT IN ('sucesso','enviando','processando')
+                                                 AND u.status NOT LIKE 'erro%%')           AS pendente,
+                              COUNT(*) FILTER (WHERE u.status LIKE 'erro%%'
+                                                 AND u.erro_codigo IN ('401','459'))        AS recibo_retificado,
+                              COUNT(*) FILTER (WHERE u.status LIKE 'erro%%'
+                                                 AND u.erro_codigo = '202')                 AS aceito_com_aviso
+                              FROM scope s
+                              LEFT JOIN ult u ON u.cpf = s.cpf
+                            """,
+                            (per, internal_id, per),
+                        )
+                        row = c.fetchone() or {}
+                        total = int(row.get("total") or 0)
+                        ok = int(row.get("ok") or 0)
+                        erro = int(row.get("erro") or 0)
+                        enviando = int(row.get("enviando") or 0)
+                        pendente = int(row.get("pendente") or 0)
+                        recibo_retificado = int(row.get("recibo_retificado") or 0)
+                        aceito_com_aviso = int(row.get("aceito_com_aviso") or 0)
+                    except Exception:
+                        conn.rollback()
 
             if total == 0:
                 estado = "sem_dados"
@@ -392,7 +441,7 @@ def s1210_anual_overview(ano: int, empresa_id: int):
                     "erro": erro,
                     "enviando": enviando,
                     "pendente": pendente,
-                    "na": 0,
+                    "na": na,
                     "recibo_retificado": recibo_retificado,
                     "aceito_com_aviso": aceito_com_aviso,
                     "tem_xlsx": False,
@@ -421,49 +470,89 @@ def s1210_cpfs_do_mes(per_apur: str, empresa_id: int, lote_num: int = 1):
 
     cpfs_rows: list[dict] = []
     ultimo_por_cpf: dict[str, dict] = {}
+    legacy_used = False
     conn = psycopg2.connect(**cfg)
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as c:
+            # 1) LEGACY: s1210_cpf_scope + s1210_cpf_envios
             try:
                 c.execute(
                     """
-                    SELECT DISTINCT ON (ev.cpf)
-                           ev.id, ev.cpf, ev.nr_recibo, ev.referenciado_recibo,
-                           ev.dt_processamento
-                      FROM explorador_eventos ev
-                     WHERE ev.tipo_evento='S-1210'
-                       AND ev.per_apur=%s
-                       AND ev.retificado_por_id IS NULL
-                       AND ev.cpf IS NOT NULL
-                     ORDER BY ev.cpf, ev.dt_processamento DESC NULLS LAST, ev.id DESC
+                    SELECT cpf, nome, matricula, row_number
+                      FROM s1210_cpf_scope
+                     WHERE empresa_id=%s AND per_apur=%s AND cpf IS NOT NULL
+                     ORDER BY row_number NULLS LAST, cpf
                     """,
-                    (per_apur,),
+                    (internal_id, per_apur),
                 )
                 cpfs_rows = list(c.fetchall())
+                if cpfs_rows:
+                    legacy_used = True
             except Exception:
                 conn.rollback()
                 cpfs_rows = []
 
-            try:
-                c.execute(
-                    """
-                    SELECT DISTINCT ON (it.cpf)
-                           it.cpf, it.status, it.nr_recibo_anterior AS nr_recibo_usado, it.nr_recibo_novo,
-                           it.erro_codigo, it.erro_mensagem,
-                           it.criado_em, it.timeline_envio_id
-                      FROM timeline_envio_item it
-                      JOIN timeline_envio te ON te.id=it.timeline_envio_id
-                      JOIN timeline_mes tm ON tm.id=te.timeline_mes_id
-                     WHERE tm.empresa_id=%s AND tm.per_apur=%s
-                       AND it.tipo_evento='S-1210'
-                     ORDER BY it.cpf, it.criado_em DESC, it.id DESC
-                    """,
-                    (internal_id, per_apur),
-                )
-                for r in c.fetchall():
-                    ultimo_por_cpf[r["cpf"]] = dict(r)
-            except Exception:
-                conn.rollback()
+            if legacy_used:
+                try:
+                    c.execute(
+                        """
+                        SELECT DISTINCT ON (cpf)
+                               cpf, status, nr_recibo_usado, nr_recibo_novo,
+                               codigo_resposta AS erro_codigo,
+                               descricao_resposta AS erro_mensagem,
+                               enviado_em AS criado_em
+                          FROM s1210_cpf_envios
+                         WHERE empresa_id=%s AND per_apur=%s
+                         ORDER BY cpf, enviado_em DESC NULLS LAST, id DESC
+                        """,
+                        (internal_id, per_apur),
+                    )
+                    for r in c.fetchall():
+                        ultimo_por_cpf[r["cpf"]] = dict(r)
+                except Exception:
+                    conn.rollback()
+            else:
+                # 2) Fallback V2: explorador_eventos + timeline_envio_item
+                try:
+                    c.execute(
+                        """
+                        SELECT DISTINCT ON (ev.cpf)
+                               ev.id, ev.cpf, ev.nr_recibo, ev.referenciado_recibo,
+                               ev.dt_processamento
+                          FROM explorador_eventos ev
+                         WHERE ev.tipo_evento='S-1210'
+                           AND ev.per_apur=%s
+                           AND ev.retificado_por_id IS NULL
+                           AND ev.cpf IS NOT NULL
+                         ORDER BY ev.cpf, ev.dt_processamento DESC NULLS LAST, ev.id DESC
+                        """,
+                        (per_apur,),
+                    )
+                    cpfs_rows = list(c.fetchall())
+                except Exception:
+                    conn.rollback()
+                    cpfs_rows = []
+
+                try:
+                    c.execute(
+                        """
+                        SELECT DISTINCT ON (it.cpf)
+                               it.cpf, it.status, it.nr_recibo_anterior AS nr_recibo_usado, it.nr_recibo_novo,
+                               it.erro_codigo, it.erro_mensagem,
+                               it.criado_em, it.timeline_envio_id
+                          FROM timeline_envio_item it
+                          JOIN timeline_envio te ON te.id=it.timeline_envio_id
+                          JOIN timeline_mes tm ON tm.id=te.timeline_mes_id
+                         WHERE tm.empresa_id=%s AND tm.per_apur=%s
+                           AND it.tipo_evento='S-1210'
+                         ORDER BY it.cpf, it.criado_em DESC, it.id DESC
+                        """,
+                        (internal_id, per_apur),
+                    )
+                    for r in c.fetchall():
+                        ultimo_por_cpf[r["cpf"]] = dict(r)
+                except Exception:
+                    conn.rollback()
     finally:
         try:
             conn.close()
@@ -473,7 +562,7 @@ def s1210_cpfs_do_mes(per_apur: str, empresa_id: int, lote_num: int = 1):
     def _norm_status(s: str | None) -> str:
         if s is None:
             return "pendente"
-        if s == "sucesso":
+        if s in ("sucesso", "ok", "ok_recuperado"):
             return "ok"
         if s.startswith("erro"):
             return "erro"

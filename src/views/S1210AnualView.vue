@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { pyApi } from "@/services/pythonApi";
 import { s1210AnualOverview } from "@/services/exploradorApi";
 
 type Estado =
@@ -38,20 +37,12 @@ interface OverviewAnual {
   meses: MesLinha[];
 }
 
-interface Empresa {
-  id: number;
-  nome: string;
-  cnpj: string | null;
-  ativo: boolean;
-}
-
 import { useEmpresaStore } from "@/stores/empresa";
 
 const router = useRouter();
 const empresaStore = useEmpresaStore();
 const ano = ref<number>(2025);
 const empresaId = computed<number>(() => empresaStore.currentId ?? 1);
-const empresas = ref<Empresa[]>([]);
 const overview = ref<OverviewAnual | null>(null);
 const loading = ref(true);
 const error = ref<string | null>(null);
@@ -284,7 +275,7 @@ async function carregar() {
   loading.value = true;
   error.value = null;
   try {
-    overview.value = await s1210AnualOverview(ano.value, empresaId.value);
+    overview.value = (await s1210AnualOverview(ano.value, empresaId.value)) as unknown as OverviewAnual;
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Falha ao carregar S-1210";
     error.value = msg;

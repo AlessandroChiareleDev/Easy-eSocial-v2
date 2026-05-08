@@ -4,7 +4,6 @@ import {
   cadeiaCpf,
   type CadeiaResp,
   type CadeiaVersao,
-  type CadeiaTentativa,
 } from "@/services/exploradorApi";
 
 const props = defineProps<{
@@ -28,7 +27,7 @@ async function carregar() {
       empresaId: props.empresaId,
       cpf: props.cpf,
       perApur: props.perApur,
-      tipoEvento: props.tipoEvento,
+      ...(props.tipoEvento ? { tipoEvento: props.tipoEvento } : {}),
     });
   } catch (e: any) {
     erro.value = e?.message ?? "falha ao carregar cadeia";

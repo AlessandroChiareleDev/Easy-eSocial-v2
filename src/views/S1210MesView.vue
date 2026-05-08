@@ -158,7 +158,9 @@ async function carregar() {
       empresa_id: resp.empresa_id,
       per_apur: resp.per_apur,
       total: resp.total,
-      cpfs: resp.cpfs as unknown as CpfRow[],
+      cpfs: (resp as unknown as { cpfs?: CpfRow[]; items?: CpfRow[] }).cpfs
+        ?? (resp as unknown as { items: CpfRow[] }).items
+        ?? [],
     };
   } catch (e) {
     error.value = e instanceof Error ? e.message : "Falha ao carregar CPFs";

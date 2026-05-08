@@ -632,5 +632,5 @@ export function categoriaDoTipo(tipo: string): CategoriaEvento {
   for (const c of CATEGORIAS) {
     if (c.tipos.includes(tipo)) return c;
   }
-  return CATEGORIAS[CATEGORIAS.length - 1]; // outros
+  return CATEGORIAS[CATEGORIAS.length - 1] as CategoriaEvento; // outros
 }

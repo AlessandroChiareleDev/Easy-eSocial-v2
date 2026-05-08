@@ -83,8 +83,9 @@ async function carregarMeses() {
   try {
     const r = await listarMesesTimeline(props.empresaId);
     meses.value = r.items;
-    if (!perApurSel.value && r.items.length) {
-      perApurSel.value = r.items[0].per_apur;
+    const first = r.items[0];
+    if (!perApurSel.value && first) {
+      perApurSel.value = first.per_apur;
     }
   } catch (e: any) {
     erroMeses.value = e?.message ?? "falha ao listar meses";
@@ -138,9 +139,11 @@ function onKey(e: KeyboardEvent) {
   if ((e.target as HTMLElement)?.tagName === "INPUT") return;
   const lst = [...regua.value.envios].sort((a, b) => a.sequencia - b.sequencia);
   const i = lst.findIndex((x) => x.id === envioSelId.value);
-  if (e.key === "[" && i > 0) envioSelId.value = lst[i - 1].id;
-  if (e.key === "]" && i >= 0 && i < lst.length - 1)
-    envioSelId.value = lst[i + 1].id;
+  const prev = lst[i - 1];
+  const next = lst[i + 1];
+  if (e.key === "[" && i > 0 && prev) envioSelId.value = prev.id;
+  if (e.key === "]" && i >= 0 && i < lst.length - 1 && next)
+    envioSelId.value = next.id;
 }
 
 onMounted(() => {

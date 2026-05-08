@@ -33,16 +33,19 @@ const rounds = computed<ItemReg[]>(() => {
   let buf: TimelineEnvio[] = [];
   const flushBuf = () => {
     if (buf.length === 0) return;
+    const first = buf[0];
+    const last = buf[buf.length - 1];
+    if (!first || !last) return;
     if (buf.length === 1) {
-      out.push({ kind: "single", env: buf[0] });
+      out.push({ kind: "single", env: first });
     } else {
       out.push({
         kind: "round",
-        key: `round-${buf[0].sequencia}-${buf[buf.length - 1].sequencia}`,
+        key: `round-${first.sequencia}-${last.sequencia}`,
         envs: [...buf],
         totalErro: buf.reduce((s, e) => s + (e.total_erro || 0), 0),
-        seqIni: buf[0].sequencia,
-        seqFim: buf[buf.length - 1].sequencia,
+        seqIni: first.sequencia,
+        seqFim: last.sequencia,
       });
     }
     buf = [];
@@ -104,12 +107,14 @@ function indexAtual(): number {
 
 function avancar() {
   const i = indexAtual();
-  if (i >= 0 && i < lista.value.length - 1)
-    emit("select", lista.value[i + 1].id);
+  const next = lista.value[i + 1];
+  if (i >= 0 && i < lista.value.length - 1 && next)
+    emit("select", next.id);
 }
 function voltar() {
   const i = indexAtual();
-  if (i > 0) emit("select", lista.value[i - 1].id);
+  const prev = lista.value[i - 1];
+  if (i > 0 && prev) emit("select", prev.id);
 }
 function irParaHead() {
   if (props.headId) emit("select", props.headId);
@@ -223,7 +228,7 @@ const isHead = computed(() => props.selectedId === props.headId);
             </div>
           </div>
           <div
-            v-for="(env, i2) in item.envs"
+            v-for="env in item.envs"
             :key="env.id"
             class="ponto-wrap"
             :class="{ selected: env.id === selectedId, 'in-round': true }"

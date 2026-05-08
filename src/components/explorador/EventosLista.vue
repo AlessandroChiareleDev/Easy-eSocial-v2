@@ -32,7 +32,7 @@ async function carregar(reset = false) {
       empresaId: props.empresaId,
       zipId: props.zipId,
       tipoEvento: props.tipoEvento,
-      cpf: filtroCpf.value || undefined,
+      ...(filtroCpf.value ? { cpf: filtroCpf.value } : {}),
       limit,
       offset: offset.value,
     });
@@ -62,11 +62,6 @@ watch(filtroCpf, () => {
   if (debounce) clearTimeout(debounce);
   debounce = window.setTimeout(() => carregar(true), 250);
 });
-
-function fmtData(s: string | null): string {
-  if (!s) return "—";
-  return s.replace("T", " ").slice(0, 16);
-}
 </script>
 
 <template>

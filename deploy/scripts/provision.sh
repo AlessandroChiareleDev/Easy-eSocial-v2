@@ -10,7 +10,7 @@ set -euo pipefail
 APP_DIR=/opt/easy-esocial
 APP_USER=esocial
 DOMAIN=easyesocial.com.br
-REPO_URL="${REPO_URL:-https://github.com/SEU_USUARIO/Easy-eSocial-v2.git}"
+REPO_URL="${REPO_URL:-https://github.com/AlessandroChiareleDev/Easy-eSocial-v2.git}"
 
 echo "==> 1. Pacotes do sistema"
 apt-get update

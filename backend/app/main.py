@@ -15,6 +15,10 @@ from .middlewares import auth_middleware, tenant_middleware
 from .timeline import router as timeline_router
 from .timeline import download_router as timeline_download_router
 from .timeline import s1210_repo_router
+from .upload_dominio import router as upload_dominio_router
+from .cruzamento import router as cruzamento_router
+from .validacao_rubrica import router as rubrica_router
+from .validacao_natureza import router as natureza_router
 
 app = FastAPI(
     title="Easy-eSocial-v2 — Explorador",
@@ -42,6 +46,10 @@ app.include_router(explorador_router)
 app.include_router(timeline_router)
 app.include_router(timeline_download_router)
 app.include_router(s1210_repo_router)
+app.include_router(upload_dominio_router)
+app.include_router(cruzamento_router)
+app.include_router(rubrica_router)
+app.include_router(natureza_router)
 
 
 @app.get("/health")

@@ -275,7 +275,10 @@ async function carregar() {
   loading.value = true;
   error.value = null;
   try {
-    overview.value = (await s1210AnualOverview(ano.value, empresaId.value)) as unknown as OverviewAnual;
+    overview.value = (await s1210AnualOverview(
+      ano.value,
+      empresaId.value,
+    )) as unknown as OverviewAnual;
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Falha ao carregar S-1210";
     error.value = msg;

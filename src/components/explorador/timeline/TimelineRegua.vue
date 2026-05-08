@@ -108,8 +108,7 @@ function indexAtual(): number {
 function avancar() {
   const i = indexAtual();
   const next = lista.value[i + 1];
-  if (i >= 0 && i < lista.value.length - 1 && next)
-    emit("select", next.id);
+  if (i >= 0 && i < lista.value.length - 1 && next) emit("select", next.id);
 }
 function voltar() {
   const i = indexAtual();

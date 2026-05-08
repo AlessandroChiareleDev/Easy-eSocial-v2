@@ -28,23 +28,27 @@ migrations/
 ## Como rodar
 
 ### 1. Sistema
+
 ```powershell
 $env:LOCAL_DB_NAME = 'easy_social_sistema'   # ou crie esse DB e ajuste .env
 python -m app.migrate apply --target sistema --version 1.0.0
 ```
 
 ### 2. Empresa (uma por CNPJ)
+
 ```powershell
 # Crie o DB primeiro: CREATE DATABASE empresa_09445502000109;
 python -m app.migrate apply --target empresa --version 1.0.0 --db empresa_09445502000109
 ```
 
 Ou via DSN completo (override total):
+
 ```powershell
 python -m app.migrate apply --target empresa --version 1.0.0 --dsn "postgresql://user:pass@host:5432/empresa_X"
 ```
 
 ### 3. Status
+
 ```powershell
 python -m app.migrate status                               # DB do .env
 python -m app.migrate status --db empresa_09445502000109   # DB especifico
@@ -60,6 +64,7 @@ python -m app.migrate status --target empresa
 ## Origem do empresa_v1.0.0.sql
 
 Extraido via `pg_dump --schema-only` do banco `easy_social_solucoes` (V1 producao local), filtrando 36 tabelas eSocial:
+
 - master_empresas, master_atividades, master_perfis, master_usuario_empresa, master_naturezas_esocial
 - explorador_eventos, explorador_atividade, explorador_importacoes, explorador_rubricas
 - empresa_zips_brutos
@@ -76,10 +81,12 @@ Extraido via `pg_dump --schema-only` do banco `easy_social_solucoes` (V1 produca
 ## Proximas versoes
 
 Para evoluir o schema, criar:
+
 - `sistema/sistema_v1.1.0.sql` — incremento sobre sistema_v1.0.0
 - `empresa/empresa_v1.1.0.sql` — incremento sobre empresa_v1.0.0
 
 Cada arquivo deve registrar a propria versao no fim:
+
 ```sql
 INSERT INTO public.schema_meta (target, version) VALUES ('empresa','1.1.0')
 ON CONFLICT (target, version) DO NOTHING;

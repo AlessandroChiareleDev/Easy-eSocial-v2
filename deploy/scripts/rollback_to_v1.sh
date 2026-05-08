@@ -15,10 +15,10 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 echo "==> 1. Procura backup V1 mais recente"
-LAST_BAK=$(ls -1t "$BACKUP_DIR"/easyesocial.com.br.v1.*.bak 2>/dev/null | head -1 || true)
+LAST_BAK=$(ls -1t "$BACKUP_DIR"/easy-social.*.bak "$BACKUP_DIR"/easyesocial*.bak 2>/dev/null | head -1 || true)
 if [[ -z "$LAST_BAK" ]]; then
     echo "!! Nenhum backup encontrado em $BACKUP_DIR"
-    echo "   Você terá que restaurar manualmente o config do V1."
+    echo "   Verifique também: /etc/nginx/sites-enabled/easy-social.bak_*"
     exit 1
 fi
 echo "   $LAST_BAK"
@@ -27,8 +27,11 @@ echo "==> 2. Para V2"
 systemctl stop easy-esocial 2>/dev/null || true
 
 echo "==> 3. Restaura nginx config V1"
-install -m 644 "$LAST_BAK" "$NGINX_SITE"
-ln -sf "$NGINX_SITE" "$NGINX_LINK"
+# Remove o site V2 ativo
+rm -f /etc/nginx/sites-enabled/easyesocial.com.br 2>/dev/null || true
+# Restaura como /etc/nginx/sites-available/easy-social e symlinka
+install -m 644 "$LAST_BAK" /etc/nginx/sites-available/easy-social
+ln -sf /etc/nginx/sites-available/easy-social /etc/nginx/sites-enabled/easy-social
 
 echo "==> 4. Testa nginx"
 nginx -t
@@ -36,19 +39,14 @@ nginx -t
 echo "==> 5. Reload nginx"
 systemctl reload nginx
 
-echo "==> 6. Sobe V1 de novo"
-# Tenta os 3 cenários comuns; ajuste se seu V1 não casa
+echo "==> 6. Sobe V1 (pm2)"
 if command -v pm2 >/dev/null 2>&1; then
-    sudo -u "${V1_USER:-root}" pm2 resurrect 2>/dev/null || \
-        echo "   !! pm2 resurrect falhou — suba V1 manualmente: pm2 start ecosystem.config.js"
+    pm2 start easy-backend 2>/dev/null || pm2 resurrect 2>/dev/null || \
+        echo "   !! Suba manualmente: pm2 start easy-backend && pm2 start easy-python"
+    pm2 start easy-python 2>/dev/null || true
+    pm2 save 2>/dev/null || true
+    pm2 list
 fi
-for svc in easy-social easysocial easyesocial easy-esocial-v1; do
-    if systemctl list-unit-files | grep -q "^$svc"; then
-        systemctl enable "$svc" 2>/dev/null || true
-        systemctl start "$svc" 2>/dev/null || true
-        echo "   systemd: $svc iniciado"
-    fi
-done
 
 echo "==> 7. Smoke V1"
 sleep 2
@@ -61,7 +59,7 @@ cat <<EOF
 V2 está parado. V1 voltou ao ar em https://$DOMAIN
 
 Logs:
-   /var/log/nginx/easyesocial.error.log
-   journalctl -u <seu-service-v1> -f
+   /var/log/nginx/easyesocial.error.log (ou easy-social.error.log)
+   pm2 logs
 
 EOF

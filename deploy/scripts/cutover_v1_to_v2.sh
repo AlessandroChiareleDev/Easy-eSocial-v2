@@ -14,8 +14,10 @@
 set -euo pipefail
 
 DOMAIN=easyesocial.com.br
-NGINX_SITE=/etc/nginx/sites-available/$DOMAIN
-NGINX_LINK=/etc/nginx/sites-enabled/$DOMAIN
+NGINX_SITE_V2=/etc/nginx/sites-available/$DOMAIN
+NGINX_LINK_V2=/etc/nginx/sites-enabled/$DOMAIN
+# Nome do site V1 atual (descoberto: /etc/nginx/sites-enabled/easy-social)
+NGINX_SITE_V1=/etc/nginx/sites-enabled/easy-social
 BACKUP_DIR=/opt/easy-esocial/backups/v1-cutover
 TS=$(date +%Y-%m-%d_%H%M)
 REPO_DIR=/opt/easy-esocial/repo
@@ -41,45 +43,38 @@ if [[ ! -f /opt/easy-esocial/frontend-dist/index.html ]]; then
 fi
 echo "   OK — frontend dist presente"
 
-echo "==> 1. Backup do nginx config V1"
+echo "==> 1. Backup do nginx config V1 (qualquer arquivo com easyesocial.com.br)"
 mkdir -p "$BACKUP_DIR"
-if [[ -f "$NGINX_SITE" ]]; then
-    cp -a "$NGINX_SITE" "$BACKUP_DIR/easyesocial.com.br.v1.$TS.bak"
-    echo "   backup: $BACKUP_DIR/easyesocial.com.br.v1.$TS.bak"
-else
-    echo "   (sem config V1 prévio em $NGINX_SITE — primeira vez)"
-fi
-
-# Procura outros nomes possíveis do site V1
-for alt in /etc/nginx/sites-available/easyesocial /etc/nginx/sites-available/default; do
-    if [[ -f "$alt" ]] && grep -q "easyesocial.com.br" "$alt" 2>/dev/null; then
-        cp -a "$alt" "$BACKUP_DIR/$(basename "$alt").v1.$TS.bak"
-        echo "   backup adicional: $alt -> $BACKUP_DIR/"
+for f in /etc/nginx/sites-available/*; do
+    [[ -f "$f" ]] || continue
+    if grep -q "easyesocial.com.br" "$f" 2>/dev/null; then
+        cp -a "$f" "$BACKUP_DIR/$(basename "$f").$TS.bak"
+        echo "   backup: $f -> $BACKUP_DIR/"
     fi
 done
 
-echo "==> 2. Para serviço V1 (se houver pm2/systemd)"
-# Tenta os 3 cenários comuns; ignora erro se não existir
+echo "==> 2. Para V1 (pm2 stop + save)"
 if command -v pm2 >/dev/null 2>&1; then
-    sudo -u "${V1_USER:-root}" pm2 stop all 2>/dev/null || true
-    sudo -u "${V1_USER:-root}" pm2 save 2>/dev/null || true
-    echo "   pm2: parado"
+    pm2 stop easy-backend 2>/dev/null || true
+    pm2 stop easy-python 2>/dev/null || true
+    pm2 save 2>/dev/null || true
+    pm2 list
+    echo "   pm2: V1 parado"
 fi
-for svc in easy-social easysocial easyesocial easy-esocial-v1; do
-    if systemctl list-unit-files | grep -q "^$svc"; then
-        systemctl stop "$svc" 2>/dev/null || true
-        systemctl disable "$svc" 2>/dev/null || true
-        echo "   systemd: $svc parado"
-    fi
-done
 
 echo "==> 3. Instala nginx config V2"
-install -m 644 "$REPO_DIR/deploy/nginx/$DOMAIN.conf" "$NGINX_SITE"
+install -m 644 "$REPO_DIR/deploy/nginx/$DOMAIN.conf" "$NGINX_SITE_V2"
 
-# Remove qualquer enabled antigo conflitante e cria symlink limpo
-find /etc/nginx/sites-enabled -maxdepth 1 -lname "*easyesocial*" -delete 2>/dev/null || true
+# Remove TODOS os enabled antigos que apontam pra easy-social/easyesocial
+for link in /etc/nginx/sites-enabled/*; do
+    [[ -L "$link" || -f "$link" ]] || continue
+    if [[ "$(basename "$link")" != "$DOMAIN" ]] && grep -q "easyesocial.com.br" "$link" 2>/dev/null; then
+        rm -f "$link"
+        echo "   removido enabled antigo: $link"
+    fi
+done
 rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
-ln -sf "$NGINX_SITE" "$NGINX_LINK"
+ln -sf "$NGINX_SITE_V2" "$NGINX_LINK_V2"
 
 echo "==> 4. Testa nginx config"
 nginx -t
@@ -108,7 +103,7 @@ Logs:      /var/log/nginx/easyesocial.{access,error}.log
 
 ROLLBACK: bash $REPO_DIR/deploy/scripts/rollback_to_v1.sh
 
-V1 não foi DELETADO — só desativado. Backup do nginx:
+V1 não foi DELETADO — só parado via pm2. Backup do nginx:
    $BACKUP_DIR/
 
 EOF

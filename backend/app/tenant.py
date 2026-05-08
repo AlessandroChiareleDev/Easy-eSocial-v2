@@ -72,17 +72,24 @@ def internal_empresa_id(empresa_id: Optional[int]) -> int:
 
 
 # ============================================================
-# API NOVA (por CNPJ) — F3 multi-tenant runtime
+# API NOVA (por CNPJ) — F5 schema-based multi-tenant
+# Pool unico no DB sistema; cada empresa = schema diferente.
+# Switching feito via SET search_path em cada conexao adquirida.
 # ============================================================
 
-_pools_by_cnpj: dict[str, ThreadedConnectionPool] = {}
+import re
+
+_VALID_SCHEMA_RE = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 
 
-def get_pool(cnpj: str) -> ThreadedConnectionPool:
-    """Retorna (ou cria) um pool por CNPJ usando empresas_routing.db_url."""
-    if cnpj in _pools_by_cnpj:
-        return _pools_by_cnpj[cnpj]
-    # Lazy import pra nao quebrar quando SISTEMA_DB_URL nao esta setado
+def _validate_schema(name: str) -> str:
+    if not _VALID_SCHEMA_RE.fullmatch(name):
+        raise ValueError(f"schema_name invalido: {name!r}")
+    return name
+
+
+def get_schema_for_cnpj(cnpj: str) -> str:
+    """Resolve o schema da empresa via empresas_routing."""
     from . import sistema_db
 
     rota = sistema_db.fetch_routing(cnpj)
@@ -90,31 +97,39 @@ def get_pool(cnpj: str) -> ThreadedConnectionPool:
         raise PermissionError(f"empresa CNPJ={cnpj} nao cadastrada em empresas_routing")
     if not rota.get("ativo"):
         raise PermissionError(f"empresa CNPJ={cnpj} esta desativada")
-    db_url = rota.get("db_url")
-    if not db_url:
-        raise RuntimeError(f"empresas_routing.db_url vazio para CNPJ={cnpj}")
-    pool = ThreadedConnectionPool(1, 10, dsn=db_url)
-    _pools_by_cnpj[cnpj] = pool
-    return pool
+    schema = rota.get("schema_name")
+    if not schema:
+        raise RuntimeError(f"empresas_routing.schema_name vazio para CNPJ={cnpj}")
+    return _validate_schema(schema)
 
 
 @contextmanager
 def empresa_conn(cnpj: str) -> Iterator[psycopg2.extensions.connection]:
-    """Context manager: abre conexao no DB da empresa (CNPJ)."""
-    pool = get_pool(cnpj)
+    """Context manager: conexao do pool sistema com search_path da empresa.
+
+    Ao final, faz RESET search_path antes de devolver ao pool.
+    """
+    from . import sistema_db
+
+    schema = get_schema_for_cnpj(cnpj)
+    pool = sistema_db._ensure_pool()  # noqa: SLF001 — reuso intencional
     conn = pool.getconn()
     try:
+        with conn.cursor() as cur:
+            cur.execute(f'SET search_path TO "{schema}", public')
         yield conn
     finally:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("RESET search_path")
+            if not conn.autocommit:
+                conn.rollback()  # garante estado limpo
+        except Exception:  # noqa: BLE001
+            pass
         pool.putconn(conn)
 
 
 def close_all_pools() -> None:
-    """Fecha todos os pools (uso em shutdown)."""
-    for cnpj, pool in list(_pools_by_cnpj.items()):
-        try:
-            pool.closeall()
-        except Exception:  # noqa: BLE001
-            pass
-        _pools_by_cnpj.pop(cnpj, None)
+    """Mantido pra compat. Pool e gerenciado por sistema_db agora."""
+    return None
 

@@ -35,7 +35,8 @@ CREATE INDEX IF NOT EXISTS idx_users_email_ativo
 CREATE TABLE IF NOT EXISTS empresas_routing (
     cnpj            TEXT PRIMARY KEY CHECK (length(cnpj) = 14),
     razao_social    TEXT NOT NULL,
-    db_url          TEXT NOT NULL,                  -- conn string do banco da empresa
+    schema_name     VARCHAR(63) NOT NULL UNIQUE
+                    CHECK (schema_name ~ '^[a-z][a-z0-9_]{0,62}$'),
     schema_version  TEXT NOT NULL,                  -- ex: '1.0.0' (deve casar com empresa_vX.Y.Z.sql)
     flags           JSONB NOT NULL DEFAULT '{}'::jsonb,
     ativo           BOOLEAN NOT NULL DEFAULT TRUE,

@@ -29,13 +29,17 @@ def _ensure_pool() -> ThreadedConnectionPool:
         raise RuntimeError(
             "SISTEMA_DB_URL nao configurado no .env (rota de auth/routing indisponivel)"
         )
-    # client_encoding=UTF8 + lc_messages=C evita UnicodeDecodeError em servers WIN-1252.
+    # client_encoding=UTF8 evita UnicodeDecodeError em servers WIN-1252.
+    # Pool unico (F5 schema-based): tamanho maior pq atende sistema + todas empresas.
+    # search_path default = sistema, public (tabelas de auth/routing ficam em schema 'sistema').
+    # tenant.empresa_conn() faz SET search_path por conexao quando precisa.
+    # Nota: lc_messages nao e settable em Supabase managed PG (permission denied).
     _pool = ThreadedConnectionPool(
-        1,
-        5,
+        2,
+        20,
         dsn=config.SISTEMA_DB_URL,
         client_encoding="UTF8",
-        options="-c lc_messages=C",
+        options="-c search_path=sistema,public",
     )
     return _pool
 
@@ -68,14 +72,14 @@ def ping() -> dict[str, Any]:
 
 # ---------- Routing ----------
 
-_ROUTING_COLS = ("cnpj", "razao_social", "db_url", "schema_version", "flags", "ativo")
+_ROUTING_COLS = ("cnpj", "razao_social", "schema_name", "schema_version", "flags", "ativo")
 
 
 def fetch_routing(cnpj: str) -> Optional[dict[str, Any]]:
     """Retorna a rota da empresa (ou None se nao existir)."""
     with sistema_conn() as c, c.cursor() as cur:
         cur.execute(
-            "SELECT cnpj, razao_social, db_url, schema_version, flags, ativo "
+            "SELECT cnpj, razao_social, schema_name, schema_version, flags, ativo "
             "FROM empresas_routing WHERE cnpj = %s",
             (cnpj,),
         )

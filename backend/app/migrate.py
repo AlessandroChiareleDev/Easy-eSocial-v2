@@ -1,19 +1,20 @@
-"""Migration runner V2 — schema unico (sistema + empresa).
+"""Migration runner V2 — schema-based (1 DB com schemas por empresa).
 
 Estrutura:
   backend/migrations/
-    sistema/sistema_v<X.Y.Z>.sql     -> aplicado no DB de sistema (auth + routing)
-    empresa/empresa_v<X.Y.Z>.sql     -> aplicado em cada DB de empresa (1 por CNPJ)
+    sistema/sistema_v<X.Y.Z>.sql     -> aplicado em schema 'public' do DB sistema
+    empresa/empresa_v<X.Y.Z>.sql     -> aplicado em schema <NOME> dentro do mesmo DB
     _legacy/*.sql                    -> migrations antigas pre-consolidacao (nao roda)
 
-Idempotencia: o runner consulta public.schema_meta(target, version) ANTES de aplicar.
-Se ja existe, pula. SQL nao precisa ser idempotente em ALTER TABLE ADD CONSTRAINT.
+F5 (schema-based): com --schema NOME, faz string replace 'public.' -> '<NOME>.'
+no SQL antes de executar, garantindo isolamento logico entre empresas.
+
+Idempotencia: consulta {schema}.schema_meta(target, version) ANTES de aplicar.
 
 Uso:
-    python -m app.migrate apply --target sistema --version 1.0.0
-    python -m app.migrate apply --target empresa --version 1.0.0 --db <db_name>
-    python -m app.migrate apply --target empresa --version 1.0.0 --dsn <conn_string>
-    python -m app.migrate status [--target sistema|empresa] [--db <db_name>]
+    python -m app.migrate apply --target sistema --version 1.0.0 --dsn <DSN>
+    python -m app.migrate apply --target empresa --version 1.0.0 --schema appa --dsn <DSN>
+    python -m app.migrate status --schema appa --dsn <DSN>
 """
 from __future__ import annotations
 
@@ -53,30 +54,51 @@ def _resolve_sql(target: str, version: str) -> Path:
     return f
 
 
-def _has_schema_meta(cur) -> bool:
+def _has_schema_meta(cur, schema: str = "public") -> bool:
     cur.execute(
         "SELECT 1 FROM information_schema.tables "
-        "WHERE table_schema='public' AND table_name='schema_meta'"
+        "WHERE table_schema=%s AND table_name='schema_meta'",
+        (schema,),
     )
     return cur.fetchone() is not None
 
 
-def _already_applied(cur, target: str, version: str) -> bool:
-    if not _has_schema_meta(cur):
+def _already_applied(cur, target: str, version: str, schema: str = "public") -> bool:
+    if not _has_schema_meta(cur, schema):
         return False
     cur.execute(
-        "SELECT 1 FROM public.schema_meta WHERE target=%s AND version=%s",
+        f"SELECT 1 FROM {schema}.schema_meta WHERE target=%s AND version=%s",
         (target, version),
     )
     return cur.fetchone() is not None
 
 
+def _validate_schema_name(name: str) -> None:
+    """Garante que o schema name e seguro pra interpolacao (so [a-z0-9_])."""
+    import re
+
+    if not re.fullmatch(r"[a-z][a-z0-9_]{0,62}", name):
+        raise ValueError(
+            f"schema name invalido: {name!r}. Deve ser [a-z][a-z0-9_]* (max 63 chars)"
+        )
+
+
+def _rewrite_sql_for_schema(sql_text: str, schema: str) -> str:
+    """Substitui 'public.' por '<schema>.' no SQL e remove SET search_path=''."""
+    _validate_schema_name(schema)
+    rewritten = sql_text.replace("public.", f"{schema}.")
+    # O dump tem essa linha que forca search_path vazio. Mantemos por seguranca.
+    return rewritten
+
+
 def cmd_apply(args: argparse.Namespace) -> int:
     sql_file = _resolve_sql(args.target, args.version)
     conn_kwargs = _build_conn_kwargs(args.db, args.dsn)
+    schema = args.schema or "public"
+    _validate_schema_name(schema)
 
     print(f"[INFO] aplicando {sql_file.name}")
-    print(f"[INFO] target={args.target} version={args.version}")
+    print(f"[INFO] target={args.target} version={args.version} schema={schema}")
 
     conn = _connect(conn_kwargs)
     try:
@@ -85,15 +107,23 @@ def cmd_apply(args: argparse.Namespace) -> int:
             row = cur.fetchone()
             print(f"[INFO] conectado em DB={row[0] if row else '?'}")
 
-            if _already_applied(cur, args.target, args.version):
-                print(f"[SKIP] {args.target} v{args.version} ja aplicado.")
+            # Cria schema se nao for public
+            if schema != "public":
+                cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
+                conn.commit()
+
+            if _already_applied(cur, args.target, args.version, schema):
+                print(f"[SKIP] {args.target} v{args.version} ja aplicado em schema={schema}.")
                 return 0
 
         sql_text = sql_file.read_text(encoding="utf-8")
+        if schema != "public":
+            sql_text = _rewrite_sql_for_schema(sql_text, schema)
+
         with conn.cursor() as cur:
             cur.execute(sql_text)
         conn.commit()
-        print(f"[OK] {args.target} v{args.version} aplicado.")
+        print(f"[OK] {args.target} v{args.version} aplicado em schema={schema}.")
         return 0
     except Exception as e:  # noqa: BLE001
         conn.rollback()
@@ -105,26 +135,28 @@ def cmd_apply(args: argparse.Namespace) -> int:
 
 def cmd_status(args: argparse.Namespace) -> int:
     conn_kwargs = _build_conn_kwargs(args.db, args.dsn)
+    schema = args.schema or "public"
+    _validate_schema_name(schema)
     conn = _connect(conn_kwargs)
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT current_database()")
             row = cur.fetchone()
-            print(f"DB: {row[0] if row else '?'}")
+            print(f"DB: {row[0] if row else '?'}  schema: {schema}")
 
-            if not _has_schema_meta(cur):
-                print("schema_meta: AUSENTE (nenhuma migration aplicada)")
+            if not _has_schema_meta(cur, schema):
+                print(f"schema_meta: AUSENTE em {schema} (nenhuma migration aplicada)")
                 return 0
 
             if args.target:
                 cur.execute(
-                    "SELECT target, version, aplicado_em FROM public.schema_meta "
+                    f"SELECT target, version, aplicado_em FROM {schema}.schema_meta "
                     "WHERE target=%s ORDER BY aplicado_em",
                     (args.target,),
                 )
             else:
                 cur.execute(
-                    "SELECT target, version, aplicado_em FROM public.schema_meta "
+                    f"SELECT target, version, aplicado_em FROM {schema}.schema_meta "
                     "ORDER BY target, aplicado_em"
                 )
             rows = cur.fetchall()
@@ -148,11 +180,17 @@ def main() -> int:
     p_apply.add_argument("--version", required=True, help="ex: 1.0.0")
     p_apply.add_argument("--db", default=None, help="override do nome do DB (usa LOCAL_DB_* do .env)")
     p_apply.add_argument("--dsn", default=None, help="DSN completo (override total)")
+    p_apply.add_argument(
+        "--schema",
+        default=None,
+        help="schema target (sed 'public.' -> '<schema>.'). Default: public",
+    )
 
     p_status = sub.add_parser("status", help="lista versoes aplicadas")
     p_status.add_argument("--target", default=None, choices=["sistema", "empresa"])
     p_status.add_argument("--db", default=None)
     p_status.add_argument("--dsn", default=None)
+    p_status.add_argument("--schema", default=None)
 
     args = p.parse_args()
     if args.cmd == "apply":

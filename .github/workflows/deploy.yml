@@ -1,0 +1,32 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: SSH into VPS and run deploy
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          command_timeout: 12m
+          script: |
+            set -e
+            cd /opt/easy-esocial/repo
+            sudo -u esocial git fetch --all
+            sudo -u esocial git checkout main
+            sudo -u esocial git pull --ff-only
+            sudo -u esocial bash /opt/easy-esocial/repo/deploy/scripts/deploy.sh main
+            curl -sfk https://easyesocial.com.br/api/health && echo "DEPLOY OK"

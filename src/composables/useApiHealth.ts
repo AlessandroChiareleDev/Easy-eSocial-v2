@@ -7,7 +7,6 @@
  */
 
 import { ref, onMounted, onBeforeUnmount } from "vue";
-import { api } from "@/services/api";
 
 export type HealthStatus = "idle" | "checking" | "online" | "offline";
 

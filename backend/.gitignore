@@ -30,3 +30,7 @@ diff_xml.txt
 *.pem
 certs/
 certificados/
+
+# pg_dump bruto (origem do empresa_v1.0.0.sql)
+migrations/_legacy/_*.sql
+migrations/_legacy/_*.txt

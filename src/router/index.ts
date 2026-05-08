@@ -84,6 +84,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import("@/views/ProblemasView.vue"),
         meta: { title: "Problemas" },
       },
+      {
+        path: "config/certificado",
+        name: "config-certificado",
+        component: () => import("@/views/ConfigCertificadoView.vue"),
+        meta: { title: "Certificado A1" },
+      },
     ],
   },
 ];

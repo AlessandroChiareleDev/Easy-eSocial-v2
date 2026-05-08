@@ -1,0 +1,25 @@
+[Unit]
+Description=Easy eSocial V2 (FastAPI + Vue)
+After=network.target
+
+[Service]
+Type=simple
+User=esocial
+Group=esocial
+WorkingDirectory=/opt/easy-esocial/backend
+EnvironmentFile=/opt/easy-esocial/backend/.env
+ExecStart=/opt/easy-esocial/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001 --workers 2 --proxy-headers --forwarded-allow-ips=127.0.0.1
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/opt/easy-esocial/logs/uvicorn.log
+StandardError=append:/opt/easy-esocial/logs/uvicorn.err.log
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/easy-esocial/logs /opt/easy-esocial/backend/uploads /opt/easy-esocial/certs
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

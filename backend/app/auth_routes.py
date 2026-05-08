@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr
 
 from . import auth, sistema_db
+from .rate_limit import login_rate_limit
 
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -23,7 +24,7 @@ class LoginResponse(BaseModel):
     empresas: list[dict[str, Any]]
 
 
-@router.post("/login", response_model=LoginResponse)
+@router.post("/login", response_model=LoginResponse, dependencies=[Depends(login_rate_limit)])
 def login(payload: LoginPayload, request: Request):
     if not sistema_db.is_available():
         raise HTTPException(status_code=503, detail="sistema_db nao configurado (.env)")

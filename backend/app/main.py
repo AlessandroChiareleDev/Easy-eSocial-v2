@@ -3,19 +3,22 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 import psycopg2
 import psycopg2.extras
 
-from . import config, db
+from . import config, db, sistema_db
+from .auth_routes import router as auth_router
 from .explorador import router as explorador_router
+from .middlewares import auth_middleware, tenant_middleware
 from .timeline import router as timeline_router
 from .timeline import download_router as timeline_download_router
 from .timeline import s1210_repo_router
 
 app = FastAPI(
     title="Easy-eSocial-v2 — Explorador",
-    description="Backend do Explorador de Arquivos (empresa SOLUCOES).",
-    version="0.1.0",
+    description="Backend do Explorador de Arquivos (multi-tenant V2).",
+    version="0.2.0",
 )
 
 app.add_middleware(
@@ -26,6 +29,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Auth + tenant middleware (opt-in: so habilita se JWT_SECRET estiver no .env).
+# Ordem: tenant depois de auth (auth roda primeiro pq foi adicionado depois).
+if config.JWT_SECRET:
+    app.add_middleware(BaseHTTPMiddleware, dispatch=tenant_middleware)
+    app.add_middleware(BaseHTTPMiddleware, dispatch=auth_middleware)
+
+app.include_router(auth_router)
 app.include_router(explorador_router)
 app.include_router(timeline_router)
 app.include_router(timeline_download_router)
@@ -104,3 +114,8 @@ def listar_empresas():
 @app.get("/health/db")
 def health_db():
     return db.ping()
+
+
+@app.get("/health/sistema")
+def health_sistema():
+    return sistema_db.ping()

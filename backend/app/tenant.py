@@ -8,18 +8,31 @@ Convencao IMPORTANTE: dentro do banco LOCAL `easy_social_solucoes`, a
 coluna `empresa_id` foi cadastrada com valor 1 (id interno do banco).
 Por isso, ao receber empresa_id=2 (SOLUCOES) na API, traduzimos para
 internal_empresa_id=1 ao executar queries no banco local.
+
+==========================================================================
+F3 — Multi-tenant runtime por CNPJ:
+  empresa_conn(cnpj) usa empresas_routing.db_url via sistema_db.fetch_routing.
+  Cada CNPJ tem seu proprio pool. APIs novas devem migrar pra essa interface.
+==========================================================================
 """
 from __future__ import annotations
 
-from typing import Optional
+from contextlib import contextmanager
+from typing import Iterator, Optional
 
 import psycopg2
+from psycopg2.pool import ThreadedConnectionPool
 
 from . import config
 
 
 APPA_ID = 1
 SOLUCOES_ID = 2
+
+
+# ============================================================
+# API LEGADA (por empresa_id) — mantida pra compat com V1
+# ============================================================
 
 
 def get_db_config_for_empresa(empresa_id: Optional[int]) -> dict:
@@ -56,3 +69,52 @@ def internal_empresa_id(empresa_id: Optional[int]) -> int:
     if eid == SOLUCOES_ID:
         return 1
     return eid
+
+
+# ============================================================
+# API NOVA (por CNPJ) — F3 multi-tenant runtime
+# ============================================================
+
+_pools_by_cnpj: dict[str, ThreadedConnectionPool] = {}
+
+
+def get_pool(cnpj: str) -> ThreadedConnectionPool:
+    """Retorna (ou cria) um pool por CNPJ usando empresas_routing.db_url."""
+    if cnpj in _pools_by_cnpj:
+        return _pools_by_cnpj[cnpj]
+    # Lazy import pra nao quebrar quando SISTEMA_DB_URL nao esta setado
+    from . import sistema_db
+
+    rota = sistema_db.fetch_routing(cnpj)
+    if not rota:
+        raise PermissionError(f"empresa CNPJ={cnpj} nao cadastrada em empresas_routing")
+    if not rota.get("ativo"):
+        raise PermissionError(f"empresa CNPJ={cnpj} esta desativada")
+    db_url = rota.get("db_url")
+    if not db_url:
+        raise RuntimeError(f"empresas_routing.db_url vazio para CNPJ={cnpj}")
+    pool = ThreadedConnectionPool(1, 10, dsn=db_url)
+    _pools_by_cnpj[cnpj] = pool
+    return pool
+
+
+@contextmanager
+def empresa_conn(cnpj: str) -> Iterator[psycopg2.extensions.connection]:
+    """Context manager: abre conexao no DB da empresa (CNPJ)."""
+    pool = get_pool(cnpj)
+    conn = pool.getconn()
+    try:
+        yield conn
+    finally:
+        pool.putconn(conn)
+
+
+def close_all_pools() -> None:
+    """Fecha todos os pools (uso em shutdown)."""
+    for cnpj, pool in list(_pools_by_cnpj.items()):
+        try:
+            pool.closeall()
+        except Exception:  # noqa: BLE001
+            pass
+        _pools_by_cnpj.pop(cnpj, None)
+

@@ -55,6 +55,22 @@ if SUPABASE_DB_HOST and SUPABASE_DB_USER:
         SUPABASE_DB_CONFIG["sslmode"] = "require"
 
 
+# --- Sistema DB (multi-tenant routing + auth) ---
+# DSN completo do DB de sistema. Exemplos:
+#   postgresql://user:pass@host:5432/easy_esocial_sistema
+# Se vazio, sistema_db.py opera em modo "indisponivel" (rotas de auth retornam 503).
+SISTEMA_DB_URL = _env("SISTEMA_DB_URL", "")
+
+# --- Auth ---
+# JWT: HS256 secret (>= 32 chars). Em prod, usar secret aleatorio.
+JWT_SECRET = _env("JWT_SECRET", "")
+JWT_ALGORITHM = _env("JWT_ALGORITHM", "HS256")
+JWT_EXPIRES_MINUTES = int(_env("JWT_EXPIRES_MINUTES", "480"))  # 8h
+
+# Fernet key (44 bytes base64) para encriptar senhas de certificado A1.
+FERNET_KEY = _env("FERNET_KEY", "")
+
+
 # --- API ---
 API_HOST = _env("API_HOST", "127.0.0.1")
 API_PORT = int(_env("API_PORT", "8001"))

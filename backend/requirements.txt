@@ -11,3 +11,8 @@ lxml==5.3.0
 
 # Env e utilidades
 python-dotenv==1.0.1
+
+# Auth (F3)
+pyjwt[crypto]==2.10.1
+bcrypt==4.2.1
+email-validator==2.2.0

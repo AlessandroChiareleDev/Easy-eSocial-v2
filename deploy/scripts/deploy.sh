@@ -34,9 +34,14 @@ npm run build
 rsync -a --delete "$REPO_DIR/dist/" "$APP_DIR/frontend-dist/"
 
 echo "==> 6. Restart serviço"
-sudo systemctl restart easy-esocial.service
+if [[ $EUID -eq 0 ]]; then
+    SUDO=""
+else
+    SUDO="sudo -n"
+fi
+$SUDO systemctl restart easy-esocial.service
 sleep 2
-sudo systemctl --no-pager --lines=10 status easy-esocial.service || true
+$SUDO systemctl --no-pager --lines=10 status easy-esocial.service || true
 
 echo "==> 7. Smoke"
 # Antes do cutover, V2 só responde local. Depois do cutover, no domínio público.

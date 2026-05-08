@@ -315,29 +315,26 @@ def s1210_anual_overview(ano: int, empresa_id: int):
     try:
         for m in range(1, 13):
             per = f"{ano}-{m:02d}"
-            total = 0
-            ok = erro = enviando = pendente = 0
-            recibo_retificado = 0
-            aceito_com_aviso = 0
-            na = 0
+            lotes_out: list[dict] = []
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as c:
-                # 1) Tenta caminho LEGACY V1: s1210_cpf_scope (universo) + s1210_cpf_envios (status)
-                legacy_used = False
+                # 1) LEGACY V1: agrupado por lote_num (s1210_cpf_scope tem lote_num)
+                legacy_rows: list[dict] = []
                 try:
                     c.execute(
                         """
                         WITH scope AS (
-                            SELECT DISTINCT cpf
+                            SELECT lote_num, cpf
                               FROM s1210_cpf_scope
                              WHERE empresa_id=%s AND per_apur=%s AND cpf IS NOT NULL
                         ),
                         ult AS (
-                            SELECT DISTINCT ON (cpf) cpf, status, codigo_resposta
+                            SELECT DISTINCT ON (cpf) cpf, lote_num, status, codigo_resposta
                               FROM s1210_cpf_envios
                              WHERE empresa_id=%s AND per_apur=%s
                              ORDER BY cpf, enviado_em DESC NULLS LAST, id DESC
                         )
                         SELECT
+                          COALESCE(s.lote_num, 1)                                       AS lote_num,
                           COUNT(*)                                                      AS total,
                           COUNT(*) FILTER (WHERE u.status IN ('ok','ok_recuperado'))    AS ok,
                           COUNT(*) FILTER (WHERE u.status LIKE 'erro%%')                AS erro,
@@ -350,25 +347,17 @@ def s1210_anual_overview(ano: int, empresa_id: int):
                                              AND u.codigo_resposta = '202')             AS aceito_com_aviso
                           FROM scope s
                           LEFT JOIN ult u ON u.cpf = s.cpf
+                         GROUP BY COALESCE(s.lote_num, 1)
+                         ORDER BY lote_num
                         """,
                         (internal_id, per, internal_id, per),
                     )
-                    row = c.fetchone() or {}
-                    total = int(row.get("total") or 0)
-                    if total > 0:
-                        legacy_used = True
-                        ok = int(row.get("ok") or 0)
-                        erro = int(row.get("erro") or 0)
-                        enviando = int(row.get("enviando") or 0)
-                        na = int(row.get("na") or 0)
-                        pendente = int(row.get("pendente") or 0)
-                        recibo_retificado = int(row.get("recibo_retificado") or 0)
-                        aceito_com_aviso = int(row.get("aceito_com_aviso") or 0)
+                    legacy_rows = list(c.fetchall())
                 except Exception:
                     conn.rollback()
 
-                # 2) Fallback caminho V2: explorador_eventos + timeline_envio_item
-                if not legacy_used:
+                # 2) Fallback V2 (timeline) — só quando legacy vazio
+                if not legacy_rows:
                     try:
                         c.execute(
                             """
@@ -391,10 +380,12 @@ def s1210_anual_overview(ano: int, empresa_id: int):
                                  ORDER BY it.cpf, it.criado_em DESC, it.id DESC
                             )
                             SELECT
+                              1                                                             AS lote_num,
                               COUNT(*)                                                      AS total,
                               COUNT(*) FILTER (WHERE u.status = 'sucesso')                  AS ok,
                               COUNT(*) FILTER (WHERE u.status LIKE 'erro%%')                AS erro,
                               COUNT(*) FILTER (WHERE u.status IN ('enviando','processando')) AS enviando,
+                              0                                                             AS na,
                               COUNT(*) FILTER (WHERE u.status IS NULL
                                                  OR u.status NOT IN ('sucesso','enviando','processando')
                                                  AND u.status NOT LIKE 'erro%%')           AS pendente,
@@ -407,47 +398,56 @@ def s1210_anual_overview(ano: int, empresa_id: int):
                             """,
                             (per, internal_id, per),
                         )
-                        row = c.fetchone() or {}
-                        total = int(row.get("total") or 0)
-                        ok = int(row.get("ok") or 0)
-                        erro = int(row.get("erro") or 0)
-                        enviando = int(row.get("enviando") or 0)
-                        pendente = int(row.get("pendente") or 0)
-                        recibo_retificado = int(row.get("recibo_retificado") or 0)
-                        aceito_com_aviso = int(row.get("aceito_com_aviso") or 0)
+                        row = c.fetchone()
+                        if row and (row.get("total") or 0) > 0:
+                            legacy_rows = [row]
                     except Exception:
                         conn.rollback()
 
-            if total == 0:
-                estado = "sem_dados"
-            elif enviando > 0:
-                estado = "processando"
-            elif pendente > 0 and ok == 0 and erro == 0:
-                estado = "pronto_para_processar"
-            elif erro > 0:
-                estado = "concluido_com_erros"
-            elif ok > 0 and pendente == 0:
-                estado = "concluido"
-            else:
-                estado = "pronto_para_processar"
-
-            meses_out.append({
-                "per_apur": per,
-                "lotes": [{
+            for row in legacy_rows:
+                total = int(row.get("total") or 0)
+                ok = int(row.get("ok") or 0)
+                erro = int(row.get("erro") or 0)
+                enviando = int(row.get("enviando") or 0)
+                pendente = int(row.get("pendente") or 0)
+                na = int(row.get("na") or 0)
+                if total == 0:
+                    estado = "sem_dados"
+                elif enviando > 0:
+                    estado = "processando"
+                elif pendente > 0 and ok == 0 and erro == 0:
+                    estado = "pronto_para_processar"
+                elif erro > 0:
+                    estado = "concluido_com_erros"
+                elif ok > 0 and pendente == 0:
+                    estado = "concluido"
+                else:
+                    estado = "pronto_para_processar"
+                lotes_out.append({
                     "per_apur": per,
-                    "lote_num": 1,
+                    "lote_num": int(row.get("lote_num") or 1),
                     "total": total,
                     "ok": ok,
                     "erro": erro,
                     "enviando": enviando,
                     "pendente": pendente,
                     "na": na,
-                    "recibo_retificado": recibo_retificado,
-                    "aceito_com_aviso": aceito_com_aviso,
+                    "recibo_retificado": int(row.get("recibo_retificado") or 0),
+                    "aceito_com_aviso": int(row.get("aceito_com_aviso") or 0),
                     "tem_xlsx": False,
                     "estado": estado,
-                }],
-            })
+                })
+
+            if not lotes_out:
+                lotes_out = [{
+                    "per_apur": per, "lote_num": 1,
+                    "total": 0, "ok": 0, "erro": 0, "enviando": 0,
+                    "pendente": 0, "na": 0,
+                    "recibo_retificado": 0, "aceito_com_aviso": 0,
+                    "tem_xlsx": False, "estado": "sem_dados",
+                }]
+
+            meses_out.append({"per_apur": per, "lotes": lotes_out})
     finally:
         try:
             conn.close()
@@ -474,16 +474,16 @@ def s1210_cpfs_do_mes(per_apur: str, empresa_id: int, lote_num: int = 1):
     conn = psycopg2.connect(**cfg)
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as c:
-            # 1) LEGACY: s1210_cpf_scope + s1210_cpf_envios
+            # 1) LEGACY: s1210_cpf_scope + s1210_cpf_envios (filtrado por lote)
             try:
                 c.execute(
                     """
                     SELECT cpf, nome, matricula, row_number
                       FROM s1210_cpf_scope
-                     WHERE empresa_id=%s AND per_apur=%s AND cpf IS NOT NULL
+                     WHERE empresa_id=%s AND per_apur=%s AND lote_num=%s AND cpf IS NOT NULL
                      ORDER BY row_number NULLS LAST, cpf
                     """,
-                    (internal_id, per_apur),
+                    (internal_id, per_apur, lote_num),
                 )
                 cpfs_rows = list(c.fetchall())
                 if cpfs_rows:

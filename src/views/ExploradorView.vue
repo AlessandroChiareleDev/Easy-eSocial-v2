@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, onMounted, computed, watch } from "vue";
 import { listarZips, type ZipRow } from "@/services/exploradorApi";
+import { useEmpresaStore } from "@/stores/empresa";
 import ZipUploader from "@/components/explorador/ZipUploader.vue";
 import ZipsList from "@/components/explorador/ZipsList.vue";
 import EventosViewer from "@/components/explorador/EventosViewer.vue";
 import HistoricoAtividade from "@/components/explorador/HistoricoAtividade.vue";
 import ChainWalkPanel from "@/components/explorador/timeline/ChainWalkPanel.vue";
 
-// MVP: empresa fixa = SOLUCOES (id=1)
-const empresaId = 1;
+const empresaStore = useEmpresaStore();
+// Default APPA=1 enquanto nenhuma empresa selecionada (raro pos-login).
+const empresaId = computed<number>(() => empresaStore.currentId ?? 1);
 
 const zips = ref<ZipRow[]>([]);
 const carregando = ref(true);
@@ -21,7 +23,7 @@ async function carregar() {
   carregando.value = true;
   erro.value = null;
   try {
-    const r = await listarZips(empresaId);
+    const r = await listarZips(empresaId.value);
     zips.value = r.items;
     historicoRef.value?.carregar();
   } catch (e) {
@@ -33,6 +35,12 @@ async function carregar() {
 }
 
 onMounted(carregar);
+// Recarrega ao trocar de empresa
+watch(empresaId, () => {
+  zips.value = [];
+  zipVisualizando.value = null;
+  carregar();
+});
 
 function onUploaded(zip: ZipRow) {
   // injeta no topo (ou substitui se já existir por sha)

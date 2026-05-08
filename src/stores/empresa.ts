@@ -68,8 +68,23 @@ export const useEmpresaStore = defineStore("empresa", () => {
     current,
     lista,
     hasSelected,
-    /** @deprecated V1 leftover: views S1210Anual/Mes ainda usam currentId */
-    currentId: computed<number | null>(() => null),
+    /**
+     * V1 leftover: mapeia CNPJ -> empresa_id numerico que ainda eh aceito
+     * por endpoints legados (Explorador, S-1210 anual). Default APPA=1.
+     *   05969071000110 -> 1 (APPA)
+     *   09445502000109 -> 2 (SOLUCOES)
+     */
+    currentId: computed<number | null>(() => {
+      const cnpj = currentCnpj.value;
+      if (!cnpj) return null;
+      if (cnpj === "05969071000110") return 1;
+      if (cnpj === "09445502000109") return 2;
+      // Fallback por schema_name
+      const sch = current.value?.schema_name;
+      if (sch === "appa") return 1;
+      if (sch === "solucoes") return 2;
+      return null;
+    }),
     setEmpresa,
     setEmpresaByCnpj,
     clear,

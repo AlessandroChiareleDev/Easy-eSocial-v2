@@ -24,6 +24,8 @@ jobs:
           command_timeout: 12m
           script: |
             set -e
+            # Marca repo como safe (root mexendo em dir do user esocial).
+            git config --global --add safe.directory /opt/easy-esocial/repo || true
             cd /opt/easy-esocial/repo
             sudo -u esocial git fetch --all
             sudo -u esocial git checkout main

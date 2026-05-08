@@ -32,7 +32,7 @@ def _extrair_sequencial(filename: str) -> str | None:
 
 
 def _ensure_empresa(empresa_id: int) -> dict:
-    with db.cursor() as c:
+    with db.cursor(empresa_id=empresa_id) as c:
         c.execute("SELECT id, nome, tipo_estado FROM master_empresas WHERE id=%s", (empresa_id,))
         row = c.fetchone()
     if not row:
@@ -53,7 +53,7 @@ def _log_atividade(
 ) -> None:
     """Grava linha em explorador_atividade. Não levanta erro se falhar."""
     try:
-        with db.cursor(commit=True) as c:
+        with db.cursor(commit=True, empresa_id=empresa_id) as c:
             c.execute(
                 """
                 INSERT INTO explorador_atividade
@@ -98,7 +98,7 @@ def upload_zip(
     nome_original = arquivo.filename or "upload.zip"
     seq = _extrair_sequencial(nome_original)
 
-    conn = db.connect()
+    conn = db.connect(empresa_id)
     oid = None
     try:
         # 1) Stream → Large Object
@@ -194,7 +194,7 @@ def upload_zip(
 
 @router.get("/zips")
 def listar_zips(empresa_id: int, limit: int = 100, offset: int = 0):
-    with db.cursor() as c:
+    with db.cursor(empresa_id=empresa_id) as c:
         c.execute(
             """
             SELECT id, empresa_id, dt_ini, dt_fim, sequencial_esocial,
@@ -302,7 +302,7 @@ def deletar_zip(zip_id: int):
 @router.get("/atividade")
 def listar_atividade(empresa_id: int, limit: int = 200):
     """Histórico de upload/exclusão/extração/duplicado."""
-    with db.cursor() as c:
+    with db.cursor(empresa_id=empresa_id) as c:
         c.execute(
             """
             SELECT id, empresa_id, acao, zip_id, nome_arquivo, sha256,

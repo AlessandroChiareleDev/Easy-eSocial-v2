@@ -72,16 +72,25 @@ async function request<T = unknown>(
   }
 
   if (!res.ok) {
-    if (res.status === 401) {
-      // Sessão inválida — limpa estado em memória
+    if (res.status === 401 && !opts.skipAuth) {
+      // Sessao invalida — limpa estado em memoria.
+      // skipAuth=true (ex: /auth/login, health check) NAO deve deslogar:
+      // 401 ali eh credencial errada / rota publica que tava protegida,
+      // nao expirou nada do usuario.
       const auth = useAuthStore();
       auth.clear();
     }
-    const err = new Error(
-      typeof body === "object" && body && "error" in body
-        ? String((body as { error: unknown }).error)
-        : `HTTP ${res.status}`,
-    ) as ApiError;
+    // FastAPI usa `detail`, Express usa `error`. Tenta os dois.
+    let msg = `HTTP ${res.status}`;
+    if (body && typeof body === "object") {
+      const b = body as Record<string, unknown>;
+      if (typeof b.detail === "string") msg = b.detail;
+      else if (typeof b.error === "string") msg = b.error;
+      else if (typeof b.message === "string") msg = b.message;
+    } else if (typeof body === "string" && body.trim() && body.length < 300) {
+      msg = body;
+    }
+    const err = new Error(msg) as ApiError;
     err.status = res.status;
     err.body = body;
     throw err;

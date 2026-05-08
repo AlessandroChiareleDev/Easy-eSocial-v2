@@ -3,7 +3,10 @@
  * Não exige auth no MVP (local).
  */
 
-const BASE = "/explorador-api";
+// Vazio: chamadas viram /api/... e batem direto no backend V2 (nginx
+// faz proxy /api/ -> 127.0.0.1:8001). Antes era "/explorador-api" que
+// nao existia em prod e caia no SPA fallback (HTML), quebrando o JSON.parse.
+const BASE = "";
 
 export interface ZipRow {
   id: number;

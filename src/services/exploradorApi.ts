@@ -1,12 +1,28 @@
 /**
- * Cliente HTTP do Explorador — backend FastAPI em :8001 via proxy /explorador-api.
- * Não exige auth no MVP (local).
+ * Cliente HTTP do Explorador — backend FastAPI V2 via proxy /api.
+ * Injeta Authorization Bearer + X-Empresa-CNPJ (mesmo padrao de api.ts).
  */
+
+import { useAuthStore } from "@/stores/auth";
+import { useEmpresaStore } from "@/stores/empresa";
 
 // Vazio: chamadas viram /api/... e batem direto no backend V2 (nginx
 // faz proxy /api/ -> 127.0.0.1:8001). Antes era "/explorador-api" que
 // nao existia em prod e caia no SPA fallback (HTML), quebrando o JSON.parse.
 const BASE = "";
+
+function authHeaders(): Record<string, string> {
+  const h: Record<string, string> = { Accept: "application/json" };
+  try {
+    const token = useAuthStore().token;
+    if (token) h["Authorization"] = `Bearer ${token}`;
+    const cnpj = useEmpresaStore().currentCnpj;
+    if (cnpj) h["X-Empresa-CNPJ"] = cnpj;
+  } catch {
+    // stores podem nao estar inicializadas em alguns contextos (SSR/teste)
+  }
+  return h;
+}
 
 export interface ZipRow {
   id: number;
@@ -108,6 +124,11 @@ export function uploadZip(args: UploadStartArgs): UploadHandle {
 
   const promise = new Promise<UploadOk>((resolve, reject) => {
     xhr.open("POST", `${BASE}/api/explorador/zips/upload`);
+    const hdrs = authHeaders();
+    for (const [k, v] of Object.entries(hdrs)) {
+      if (k.toLowerCase() === "accept") continue;
+      xhr.setRequestHeader(k, v);
+    }
 
     xhr.upload.onprogress = (e) => {
       if (!e.lengthComputable) return;
@@ -164,7 +185,7 @@ export function uploadZip(args: UploadStartArgs): UploadHandle {
 }
 
 async function getJson<T>(path: string): Promise<T> {
-  const r = await fetch(`${BASE}${path}`);
+  const r = await fetch(`${BASE}${path}`, { headers: authHeaders() });
   if (!r.ok) {
     const text = await r.text().catch(() => "");
     throw Object.assign(new Error(text || `HTTP ${r.status}`), {
@@ -174,7 +195,10 @@ async function getJson<T>(path: string): Promise<T> {
   return r.json() as Promise<T>;
 }
 async function postJson<T>(path: string): Promise<T> {
-  const r = await fetch(`${BASE}${path}`, { method: "POST" });
+  const r = await fetch(`${BASE}${path}`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
   if (!r.ok) {
     const text = await r.text().catch(() => "");
     throw Object.assign(new Error(text || `HTTP ${r.status}`), {
@@ -223,6 +247,7 @@ export async function extrairZip(zipId: number) {
 export async function deletarZip(zipId: number) {
   const r = await fetch(`${BASE}/api/explorador/zips/${zipId}`, {
     method: "DELETE",
+    headers: authHeaders(),
   });
   if (!r.ok) {
     const text = await r.text().catch(() => "");

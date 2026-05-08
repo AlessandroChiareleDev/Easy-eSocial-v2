@@ -9,6 +9,7 @@ import psycopg2.extras
 
 from . import config, db, sistema_db
 from .auth_routes import router as auth_router
+from .cert_routes import router as cert_router
 from .explorador import router as explorador_router
 from .middlewares import auth_middleware, tenant_middleware
 from .timeline import router as timeline_router
@@ -36,6 +37,7 @@ if config.JWT_SECRET:
     app.add_middleware(BaseHTTPMiddleware, dispatch=auth_middleware)
 
 app.include_router(auth_router)
+app.include_router(cert_router)
 app.include_router(explorador_router)
 app.include_router(timeline_router)
 app.include_router(timeline_download_router)

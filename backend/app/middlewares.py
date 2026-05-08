@@ -23,6 +23,7 @@ from . import auth, config
 
 _PUBLIC_PREFIXES = (
     "/api/auth/login",
+    "/api/health",
     "/health",
     "/docs",
     "/openapi.json",

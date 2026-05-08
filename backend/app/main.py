@@ -61,6 +61,17 @@ def health():
     }
 
 
+@app.get("/api/health")
+def api_health():
+    # Mesma resposta do /health, mas em /api/* (e marcada como publica
+    # no auth_middleware) pra o ping do frontend nao pedir JWT.
+    return {
+        "status": "ok",
+        "service": "easy-esocial-v2-explorador",
+        "version": app.version,
+    }
+
+
 @app.get("/api/empresas")
 def listar_empresas():
     """Lista as empresas do master_empresas no Supabase (V1).

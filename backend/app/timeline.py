@@ -411,15 +411,19 @@ def s1210_anual_overview(ano: int, empresa_id: int):
                 enviando = int(row.get("enviando") or 0)
                 pendente = int(row.get("pendente") or 0)
                 na = int(row.get("na") or 0)
+                # Estado considerando N/A como "resolvido" (lote pode ser
+                # 100% N/A — ex.: APPA L4 fev/mar 2025: 2 CPFs sem fato gerador,
+                # ambos com status='na' → lote esta concluido, nao "pronto").
+                resolvidos = ok + na + erro
                 if total == 0:
                     estado = "sem_dados"
                 elif enviando > 0:
                     estado = "processando"
-                elif pendente > 0 and ok == 0 and erro == 0:
+                elif pendente > 0:
                     estado = "pronto_para_processar"
                 elif erro > 0:
                     estado = "concluido_com_erros"
-                elif ok > 0 and pendente == 0:
+                elif resolvidos >= total:
                     estado = "concluido"
                 else:
                     estado = "pronto_para_processar"
@@ -448,12 +452,217 @@ def s1210_anual_overview(ano: int, empresa_id: int):
                 }]
 
             meses_out.append({"per_apur": per, "lotes": lotes_out})
+
+        # ------------------------------------------------------------------
+        # Enriquecer cada mes com status de fechamento (S-1299/S-1298).
+        # Fontes (em ordem de preferencia):
+        #   1) public.s1299_fechamento_status  (marcacao manual/sync)
+        #   2) public.explorador_eventos       (ultimo evento valido cd=201)
+        # ------------------------------------------------------------------
+        fechamento_map: dict[str, dict] = {}
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as c:
+            try:
+                c.execute(
+                    """
+                    SELECT per_apur, fechado, nr_recibo, confirmado_em, origem
+                      FROM s1299_fechamento_status
+                     WHERE empresa_id=%s AND per_apur LIKE %s
+                    """,
+                    (internal_id, f"{ano}-%"),
+                )
+                for r in c.fetchall():
+                    fechamento_map[r["per_apur"]] = {
+                        "fechado": bool(r.get("fechado")),
+                        "nr_recibo_fechamento": r.get("nr_recibo"),
+                        "fechamento_origem": r.get("origem"),
+                        "fechamento_em": (
+                            r["confirmado_em"].isoformat()
+                            if r.get("confirmado_em") else None
+                        ),
+                    }
+            except Exception:
+                conn.rollback()
+
+        # Recibos reais do explorador_eventos (ultimo cd=201 por per_apur)
+        recibos_1299: dict[str, dict] = {}
+        recibos_1298: dict[str, dict] = {}
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as c:
+            try:
+                c.execute(
+                    """
+                    SELECT DISTINCT ON (per_apur)
+                           per_apur, nr_recibo, dt_processamento
+                      FROM explorador_eventos
+                     WHERE tipo_evento='S-1299'
+                       AND cd_resposta='201'
+                       AND per_apur LIKE %s
+                     ORDER BY per_apur, dt_processamento DESC
+                    """,
+                    (f"{ano}-%",),
+                )
+                for r in c.fetchall():
+                    recibos_1299[r["per_apur"]] = {
+                        "nr_recibo": r.get("nr_recibo"),
+                        "dt": (
+                            r["dt_processamento"].isoformat()
+                            if r.get("dt_processamento") else None
+                        ),
+                    }
+            except Exception:
+                conn.rollback()
+            try:
+                c.execute(
+                    """
+                    SELECT DISTINCT ON (per_apur)
+                           per_apur, nr_recibo, dt_processamento
+                      FROM explorador_eventos
+                     WHERE tipo_evento='S-1298'
+                       AND cd_resposta='201'
+                       AND per_apur LIKE %s
+                     ORDER BY per_apur, dt_processamento DESC
+                    """,
+                    (f"{ano}-%",),
+                )
+                for r in c.fetchall():
+                    recibos_1298[r["per_apur"]] = {
+                        "nr_recibo": r.get("nr_recibo"),
+                        "dt": (
+                            r["dt_processamento"].isoformat()
+                            if r.get("dt_processamento") else None
+                        ),
+                    }
+            except Exception:
+                conn.rollback()
+
+        for mes in meses_out:
+            per = mes["per_apur"]
+            info = fechamento_map.get(per, {})
+            r99 = recibos_1299.get(per)
+            r98 = recibos_1298.get(per)
+            # Estado real: comparar dt do ultimo S-1298 vs S-1299
+            estado_atual = info.get("fechado")
+            if r99 and r98:
+                estado_atual = (r99["dt"] or "") >= (r98["dt"] or "")
+            elif r99:
+                estado_atual = True
+            elif r98:
+                estado_atual = False
+            mes["fechado"] = bool(estado_atual) if estado_atual is not None else bool(info.get("fechado"))
+            mes["nr_recibo_fechamento"] = (
+                (r99 or {}).get("nr_recibo") or info.get("nr_recibo_fechamento")
+            )
+            mes["dt_fechamento"] = (r99 or {}).get("dt") or info.get("fechamento_em")
+            mes["nr_recibo_abertura"] = (r98 or {}).get("nr_recibo")
+            mes["dt_abertura"] = (r98 or {}).get("dt")
+            mes["fechamento_origem"] = info.get("fechamento_origem")
     finally:
         try:
             conn.close()
         except Exception:  # noqa: BLE001
             pass
     return {"ano": ano, "empresa_id": empresa_id, "meses": meses_out}
+
+
+@s1210_repo_router.post("/anual/sync-fechamento")
+def s1210_sync_fechamento(ano: int, empresa_id: int):
+    """Escaneia explorador_eventos e atualiza s1299_fechamento_status.
+
+    Para cada per_apur do ano:
+      - pega o ULTIMO S-1298 valido (cd_resposta=201) -> dt_abertura
+      - pega o ULTIMO S-1299 valido (cd_resposta=201) -> dt_fechamento
+      - se ambos: fechado = dt_fechamento >= dt_abertura
+      - se só S-1299: fechado=True
+      - se só S-1298: fechado=False (mes reaberto)
+    Cria a tabela se nao existir e UPSERT.
+    """
+    from . import tenant
+    cfg = tenant.get_db_config_for_empresa(empresa_id)
+    internal_id = tenant.internal_empresa_id(empresa_id)
+
+    atualizados = []
+    conn = psycopg2.connect(**cfg)
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as c:
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS s1299_fechamento_status (
+                  empresa_id    INT          NOT NULL,
+                  per_apur      VARCHAR(7)   NOT NULL,
+                  fechado       BOOLEAN      NOT NULL DEFAULT FALSE,
+                  protocolo     VARCHAR(100),
+                  nr_recibo     VARCHAR(100),
+                  confirmado_em TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+                  origem        VARCHAR(40)  DEFAULT 'sync',
+                  PRIMARY KEY (empresa_id, per_apur)
+                )
+            """)
+            conn.commit()
+            c.execute(
+                """
+                SELECT DISTINCT ON (per_apur)
+                       per_apur, nr_recibo, dt_processamento
+                  FROM explorador_eventos
+                 WHERE tipo_evento='S-1299' AND cd_resposta='201'
+                   AND per_apur LIKE %s
+                 ORDER BY per_apur, dt_processamento DESC
+                """,
+                (f"{ano}-%",),
+            )
+            map_1299 = {r["per_apur"]: r for r in c.fetchall()}
+            c.execute(
+                """
+                SELECT DISTINCT ON (per_apur)
+                       per_apur, nr_recibo, dt_processamento
+                  FROM explorador_eventos
+                 WHERE tipo_evento='S-1298' AND cd_resposta='201'
+                   AND per_apur LIKE %s
+                 ORDER BY per_apur, dt_processamento DESC
+                """,
+                (f"{ano}-%",),
+            )
+            map_1298 = {r["per_apur"]: r for r in c.fetchall()}
+
+            pers = set(map_1299) | set(map_1298)
+            for per in sorted(pers):
+                r99 = map_1299.get(per)
+                r98 = map_1298.get(per)
+                if r99 and r98:
+                    fechado = r99["dt_processamento"] >= r98["dt_processamento"]
+                elif r99:
+                    fechado = True
+                else:
+                    fechado = False
+                nr_recibo = (r99 or {}).get("nr_recibo") if fechado else (r98 or {}).get("nr_recibo")
+                c.execute(
+                    """
+                    INSERT INTO s1299_fechamento_status
+                          (empresa_id, per_apur, fechado, nr_recibo, origem, confirmado_em)
+                    VALUES (%s, %s, %s, %s, 'sync', NOW())
+                    ON CONFLICT (empresa_id, per_apur) DO UPDATE
+                       SET fechado       = EXCLUDED.fechado,
+                           nr_recibo     = COALESCE(EXCLUDED.nr_recibo, s1299_fechamento_status.nr_recibo),
+                           origem        = 'sync',
+                           confirmado_em = NOW()
+                    """,
+                    (internal_id, per, fechado, nr_recibo),
+                )
+                atualizados.append({
+                    "per_apur": per,
+                    "fechado": fechado,
+                    "nr_recibo": nr_recibo,
+                })
+            conn.commit()
+    finally:
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
+    return {
+        "ok": True,
+        "ano": ano,
+        "empresa_id": empresa_id,
+        "total": len(atualizados),
+        "atualizados": atualizados,
+    }
 
 
 @s1210_repo_router.get("/cpfs-do-mes")

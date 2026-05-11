@@ -29,6 +29,12 @@ interface Celula {
 interface MesLinha {
   per_apur: string;
   lotes: Celula[];
+  fechado?: boolean;
+  nr_recibo_fechamento?: string | null;
+  nr_recibo_abertura?: string | null;
+  dt_fechamento?: string | null;
+  dt_abertura?: string | null;
+  fechamento_origem?: string | null;
 }
 
 interface OverviewAnual {
@@ -79,6 +85,7 @@ const resumo = computed(() => {
     na: 0,
     mesesAtivos: 0,
     mesesTotal: 12,
+    mesesFechados: 0,
     recibo_retificado: 0,
     aceito_com_aviso: 0,
   };
@@ -86,6 +93,7 @@ const resumo = computed(() => {
   out.mesesTotal = overview.value.meses.length || 12;
   for (const mes of overview.value.meses) {
     let mesTemDados = false;
+    if (mes.fechado) out.mesesFechados += 1;
     for (const c of mes.lotes) {
       out.total += c.total;
       out.ok += c.ok;
@@ -267,6 +275,36 @@ function processarLotes() {
   );
 }
 
+async function sincronizarFechamento() {
+  try {
+    const r = await fetch(
+      `/api/s1210-repo/anual/sync-fechamento?ano=${ano.value}&empresa_id=${empresaId.value}`,
+      { method: "POST" },
+    );
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    await carregar();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "Falha ao sincronizar fechamento";
+  }
+}
+
+function tooltipFechamento(mes: MesLinha): string {
+  const lines: string[] = [];
+  if (mes.fechado) {
+    lines.push("MÊS FECHADO (S-1299)");
+    if (mes.nr_recibo_fechamento) lines.push(`Recibo: ${mes.nr_recibo_fechamento}`);
+    if (mes.dt_fechamento) lines.push(`Fechado em: ${mes.dt_fechamento.slice(0, 19).replace("T", " ")}`);
+  } else {
+    lines.push("MÊS ABERTO");
+    if (mes.nr_recibo_abertura)
+      lines.push(`Recibo S-1298 (reabertura): ${mes.nr_recibo_abertura}`);
+    if (mes.dt_abertura)
+      lines.push(`Reaberto em: ${mes.dt_abertura.slice(0, 19).replace("T", " ")}`);
+  }
+  if (mes.fechamento_origem) lines.push(`Origem: ${mes.fechamento_origem}`);
+  return lines.join("\n");
+}
+
 function voltarRepositorio() {
   router.push("/");
 }
@@ -345,6 +383,14 @@ onMounted(() => {
             <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
           </svg>
         </button>
+        <button
+          class="icon-btn"
+          :disabled="loading"
+          title="Sincronizar estado de fechamento (S-1299/S-1298) a partir dos eventos do eSocial"
+          @click="sincronizarFechamento"
+        >
+          🔒
+        </button>
         <button class="btn-power" :disabled="loading" @click="processarLotes">
           <svg
             width="14"
@@ -399,6 +445,12 @@ onMounted(() => {
         <div class="kpi-label">Meses ativos</div>
         <div class="kpi-value">
           {{ resumo.mesesAtivos }} <span class="kpi-divider">/</span> 12
+        </div>
+      </div>
+      <div class="kpi-card kpi-fechados" v-if="resumo.mesesFechados > 0">
+        <div class="kpi-label">🔒 Meses fechados</div>
+        <div class="kpi-value">
+          {{ resumo.mesesFechados }} <span class="kpi-divider">/</span> 12
         </div>
       </div>
       <div class="kpi-card">
@@ -478,9 +530,12 @@ onMounted(() => {
         </div>
         <div v-if="empresaUsaLotesDinamicos" class="grid-th">Ações</div>
 
-        <div v-for="mes in overview.meses" :key="mes.per_apur" class="grid-row">
-          <div class="cell-mes">
-            <div class="cell-mes-label">{{ labelMes(mes.per_apur).label }}</div>
+        <div v-for="mes in overview.meses" :key="mes.per_apur" class="grid-row" :class="{ 'row-fechado': mes.fechado }">
+          <div class="cell-mes" :title="tooltipFechamento(mes)">
+            <div class="cell-mes-label">
+              {{ labelMes(mes.per_apur).label }}
+              <span v-if="mes.fechado" class="badge-fechado" title="Mês fechado (S-1299)">FECHADO</span>
+            </div>
             <div class="cell-mes-sub">{{ mes.per_apur }}</div>
             <div
               class="cell-mes-bar"
@@ -490,6 +545,9 @@ onMounted(() => {
                 class="cell-mes-bar-fill"
                 :style="{ width: mesProgress(mes) + '%' }"
               ></div>
+            </div>
+            <div v-if="mes.nr_recibo_fechamento && mes.fechado" class="cell-mes-recibo">
+              R: {{ mes.nr_recibo_fechamento.slice(-10) }}
             </div>
           </div>
 
@@ -1404,5 +1462,40 @@ onMounted(() => {
 }
 .kpi-value.aviso {
   color: #ffd060;
+}
+
+/* ========== MÊS FECHADO (brilho verde S-1299) ========== */
+.grid-row.row-fechado {
+  outline: 2px solid #22c55e;
+  outline-offset: -2px;
+  background: rgba(34, 197, 94, 0.06) !important;
+  box-shadow: inset 0 0 22px rgba(34, 197, 94, 0.2);
+}
+.badge-fechado {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  background: #22c55e;
+  color: #04210f;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  vertical-align: middle;
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+}
+.cell-mes-recibo {
+  font-family: "JetBrains Mono Variable", ui-monospace, monospace;
+  font-size: 10px;
+  color: rgba(134, 239, 172, 0.85);
+  margin-top: 4px;
+  letter-spacing: 0.05em;
+}
+.kpi-card.kpi-fechados {
+  border-color: rgba(34, 197, 94, 0.35) !important;
+  background: rgba(34, 197, 94, 0.06) !important;
+}
+.kpi-card.kpi-fechados .kpi-value {
+  color: #86efac;
 }
 </style>

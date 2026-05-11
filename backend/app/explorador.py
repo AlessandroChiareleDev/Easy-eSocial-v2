@@ -5,14 +5,14 @@ import json
 import re
 import zipfile
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Optional
 
 import psycopg2
 import psycopg2.extras
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
-from . import config, db, storage
+from . import config, db, storage, tenant
 from .esocial_parser import parse_xml_bytes
 
 router = APIRouter(prefix="/api/explorador", tags=["explorador"])
@@ -250,6 +250,7 @@ def reupload_zip(
     zip_id: int,
     arquivo: UploadFile = File(...),
     forcar: bool = Form(False, description="Se True, aceita SHA-256 diferente"),
+    empresa_id: Optional[int] = Form(None, description="Tenant alvo (default: tenta todos)"),
 ):
     """Substitui o Large Object do ZIP existente (recupera card com LO perdido).
 
@@ -259,17 +260,23 @@ def reupload_zip(
     """
     nome_original = arquivo.filename or "reupload.zip"
 
-    # 1) lê o card existente
-    with db.cursor() as c:
-        c.execute(
-            """SELECT id, empresa_id, conteudo_oid, sha256, tamanho_bytes,
-                      nome_arquivo_original, extracao_status
-               FROM empresa_zips_brutos WHERE id=%s""",
-            (zip_id,),
-        )
-        row = c.fetchone()
-        if not row:
-            raise HTTPException(404, "zip não encontrado")
+    # 1) lê o card existente. Se empresa_id não foi passado, varre tenants conhecidos
+    #    (multi-tenant: cada empresa tem seu próprio DB, então db.cursor() default = APPA).
+    tenants_a_tentar = [empresa_id] if empresa_id is not None else [tenant.APPA_ID, tenant.SOLUCOES_ID]
+    row = None
+    for eid in tenants_a_tentar:
+        with db.cursor(empresa_id=eid) as c:
+            c.execute(
+                """SELECT id, empresa_id, conteudo_oid, sha256, tamanho_bytes,
+                          nome_arquivo_original, extracao_status
+                   FROM empresa_zips_brutos WHERE id=%s""",
+                (zip_id,),
+            )
+            row = c.fetchone()
+            if row:
+                break
+    if not row:
+        raise HTTPException(404, "zip não encontrado")
 
     empresa_id = row["empresa_id"]
     old_oid = int(row["conteudo_oid"]) if row["conteudo_oid"] is not None else None

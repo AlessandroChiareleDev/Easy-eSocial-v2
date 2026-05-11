@@ -203,7 +203,7 @@ async function disparaReupload(z: ZipRow) {
       await reuploadZip(z.id, file, forcar, (pct) => {
         reuploadAndamento.value.set(z.id, pct);
         reuploadAndamento.value = new Map(reuploadAndamento.value);
-      });
+      }, props.empresaId);
       emit("refresh");
     } catch (e) {
       const msg = (e as Error).message;
@@ -218,7 +218,7 @@ async function disparaReupload(z: ZipRow) {
             await reuploadZip(z.id, file, true, (pct) => {
               reuploadAndamento.value.set(z.id, pct);
               reuploadAndamento.value = new Map(reuploadAndamento.value);
-            });
+            }, props.empresaId);
             emit("refresh");
           } catch (e2) {
             extracaoErro.value.set(z.id, (e2 as Error).message);

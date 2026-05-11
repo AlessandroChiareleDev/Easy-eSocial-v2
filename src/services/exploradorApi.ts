@@ -314,10 +314,12 @@ export async function reuploadZip(
   file: File,
   forcar = false,
   onProgress?: (pct: number) => void,
+  empresaId?: number,
 ): Promise<ReuploadResp> {
   const fd = new FormData();
   fd.append("arquivo", file);
   fd.append("forcar", forcar ? "true" : "false");
+  if (empresaId !== undefined) fd.append("empresa_id", String(empresaId));
 
   return new Promise<ReuploadResp>((resolve, reject) => {
     const xhr = new XMLHttpRequest();

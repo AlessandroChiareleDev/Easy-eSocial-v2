@@ -163,14 +163,24 @@ async function disparaReextrairS5002(z: ZipRow) {
   extracaoErro.value.delete(z.id);
   extraindo.value = new Set(extraindo.value);
   try {
-    await extrairZip(z.id, {
+    const r = await extrairZip(z.id, {
       somenteS5002: true,
       empresaId: props.empresaId,
     });
     emit("refresh");
+    window.alert(
+      `✅ RE-EXTRAÇÃO S-5002 OK\n\n` +
+        `XMLs lidos: ${r.total_xmls ?? "?"}\n` +
+        `S-5002 indexados: ${r.indexados ?? "?"}\n` +
+        `Falhas: ${r.falhas ?? 0}\n` +
+        `Período dominante: ${r.perapur_dominante ?? "?"}\n\n` +
+        `Agora pode ir no S-1210 Anual e ver os valores do S-5002 por CPF.`,
+    );
   } catch (e) {
-    extracaoErro.value.set(z.id, (e as Error).message);
+    const msg = (e as Error).message;
+    extracaoErro.value.set(z.id, msg);
     extracaoErro.value = new Map(extracaoErro.value);
+    window.alert(`❌ FALHA NA RE-EXTRAÇÃO S-5002\n\n${msg}`);
   } finally {
     extraindo.value.delete(z.id);
     extraindo.value = new Set(extraindo.value);
@@ -200,11 +210,19 @@ async function disparaReupload(z: ZipRow) {
     reuploadAndamento.value = new Map(reuploadAndamento.value);
     extracaoErro.value.delete(z.id);
     try {
-      await reuploadZip(z.id, file, forcar, (pct) => {
+      const r = await reuploadZip(z.id, file, forcar, (pct) => {
         reuploadAndamento.value.set(z.id, pct);
         reuploadAndamento.value = new Map(reuploadAndamento.value);
       }, props.empresaId);
       emit("refresh");
+      window.alert(
+        `✅ RE-UPLOAD OK\n\n` +
+          `Arquivo: ${file.name}\n` +
+          `Tamanho: ${formatBytes(r.tamanho_bytes)}\n` +
+          `SHA-256 ${r.sha_bate ? "bate" : "DIFERENTE"} com o original\n` +
+          `LO novo: ${r.oid_novo} (antigo: ${r.oid_antigo ?? "-"})\n\n` +
+          `Agora clique em "🔄 Re-extrair S-5002" pra reimportar só os valores do S-5002.`,
+      );
     } catch (e) {
       const msg = (e as Error).message;
       // Se falhou por sha diferente, oferece forçar
@@ -215,19 +233,28 @@ async function disparaReupload(z: ZipRow) {
         );
         if (ok2) {
           try {
-            await reuploadZip(z.id, file, true, (pct) => {
+            const r2 = await reuploadZip(z.id, file, true, (pct) => {
               reuploadAndamento.value.set(z.id, pct);
               reuploadAndamento.value = new Map(reuploadAndamento.value);
             }, props.empresaId);
             emit("refresh");
+            window.alert(
+              `✅ RE-UPLOAD OK (forçado)\n\n` +
+                `Tamanho: ${formatBytes(r2.tamanho_bytes)}\n` +
+                `LO novo: ${r2.oid_novo}\n\n` +
+                `Agora clique em "🔄 Re-extrair S-5002".`,
+            );
           } catch (e2) {
-            extracaoErro.value.set(z.id, (e2 as Error).message);
+            const msg2 = (e2 as Error).message;
+            extracaoErro.value.set(z.id, msg2);
             extracaoErro.value = new Map(extracaoErro.value);
+            window.alert(`❌ FALHA NO RE-UPLOAD\n\n${msg2}`);
           }
         }
       } else {
         extracaoErro.value.set(z.id, msg);
         extracaoErro.value = new Map(extracaoErro.value);
+        window.alert(`❌ FALHA NO RE-UPLOAD\n\n${msg}`);
       }
     } finally {
       reuploadAndamento.value.delete(z.id);

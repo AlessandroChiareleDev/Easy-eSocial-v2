@@ -55,6 +55,7 @@ def _log_atividade(
 ) -> None:
     """Grava linha em explorador_atividade. Não levanta erro se falhar."""
     try:
+        internal_id = tenant.internal_empresa_id(empresa_id)
         with db.cursor(commit=True, empresa_id=empresa_id) as c:
             c.execute(
                 """
@@ -64,7 +65,7 @@ def _log_atividade(
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
-                    empresa_id, acao, zip_id, nome_arquivo, sha256,
+                    internal_id, acao, zip_id, nome_arquivo, sha256,
                     tamanho_bytes, total_xmls,
                     json.dumps(detalhe) if detalhe is not None else None,
                 ),
@@ -90,6 +91,9 @@ def upload_zip(
     em paralelo. Dedup por (empresa_id, sha256).
     """
     _ensure_empresa(empresa_id)
+    # IMPORTANTE: empresa_id da request é o externo (APPA=1, SOLUCOES=2).
+    # No DB, rows da SOLUCOES guardam empresa_id=1 (convenção interna).
+    internal_id = tenant.internal_empresa_id(empresa_id)
 
     try:
         d_ini = date.fromisoformat(dt_ini)
@@ -115,11 +119,11 @@ def upload_zip(
             conn.commit()
             raise HTTPException(413, f"arquivo > {config.MAX_UPLOAD_BYTES} bytes")
 
-        # 2) Dedup por (empresa_id, sha256)
+        # 2) Dedup por (empresa_id, sha256) — usa internal_id
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 "SELECT id FROM empresa_zips_brutos WHERE empresa_id=%s AND sha256=%s",
-                (empresa_id, sha256_hex),
+                (internal_id, sha256_hex),
             )
             existing = cur.fetchone()
 
@@ -153,7 +157,7 @@ def upload_zip(
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'pendente')
                 RETURNING id, enviado_em
                 """,
-                (empresa_id, d_ini, d_fim, seq, nome_original, sha256_hex, total_bytes, oid),
+                (internal_id, d_ini, d_fim, seq, nome_original, sha256_hex, total_bytes, oid),
             )
             ins = cur.fetchone()
 

@@ -308,8 +308,8 @@ const selecaoCount = computed(() => selecionados.value.size);
       <div class="bb-left">
         <span class="bb-title">🔄 Batch S-5002</span>
         <span class="bb-sub">
-          Selecione 1+ zips indexados para enriquecer S-5002 e rodar análise
-          de cobertura por CPF.
+          Selecione 1+ zips indexados para enriquecer S-5002 e rodar análise de
+          cobertura por CPF.
         </span>
       </div>
       <div class="bb-right">
@@ -442,9 +442,7 @@ const selecaoCount = computed(() => selecionados.value.size);
             class="btn-ghost btn-reupload"
             :disabled="reuploadAndamento.has(z.id)"
             @click="disparaReupload(z)"
-            :title="
-              'Re-envia o mesmo ZIP para recuperar o card (substitui o Large Object perdido).'
-            "
+            :title="'Re-envia o mesmo ZIP para recuperar o card (substitui o Large Object perdido).'"
           >
             <template v-if="reuploadAndamento.has(z.id)">
               📤 enviando… {{ Math.floor(reuploadAndamento.get(z.id) ?? 0) }}%
@@ -456,9 +454,7 @@ const selecaoCount = computed(() => selecionados.value.size);
             class="btn-ghost"
             :disabled="extraindo.has(z.id) || batchRodando"
             @click="disparaReextrairS5002(z)"
-            :title="
-              'Reextrai apenas S-5002 (não toca S-1210). Útil para mês já enviado.'
-            "
+            :title="'Reextrai apenas S-5002 (não toca S-1210). Útil para mês já enviado.'"
           >
             {{ extraindo.has(z.id) ? "… re-extraindo" : "🔄 Só S-5002" }}
           </button>
@@ -498,14 +494,18 @@ const selecaoCount = computed(() => selecionados.value.size);
 
         <div class="modal-body">
           <!-- Progresso -->
-          <div v-if="batchRodando || batchProgresso.feitos < batchProgresso.total" class="progress">
+          <div
+            v-if="batchRodando || batchProgresso.feitos < batchProgresso.total"
+            class="progress"
+          >
             <div class="progress-bar">
               <div
                 class="progress-fill"
                 :style="{
                   width:
                     batchProgresso.total > 0
-                      ? (batchProgresso.feitos / batchProgresso.total) * 100 + '%'
+                      ? (batchProgresso.feitos / batchProgresso.total) * 100 +
+                        '%'
                       : '0%',
                 }"
               ></div>
@@ -523,7 +523,8 @@ const selecaoCount = computed(() => selecionados.value.size);
             <strong>⚠ {{ batchErros.length }} zip(s) falharam:</strong>
             <ul>
               <li v-for="e in batchErros" :key="e.zip_id">
-                <span class="mono">{{ e.nome }}</span>: {{ e.erro }}
+                <span class="mono">{{ e.nome }}</span
+                >: {{ e.erro }}
               </li>
             </ul>
           </div>
@@ -580,10 +581,7 @@ const selecaoCount = computed(() => selecionados.value.size);
                 </tr>
               </thead>
               <tbody>
-                <tr
-                  v-for="r in analiseResultado.por_perapur"
-                  :key="r.per_apur"
-                >
+                <tr v-for="r in analiseResultado.por_perapur" :key="r.per_apur">
                   <td class="mono">{{ r.per_apur }}</td>
                   <td class="mono">{{ r.cpfs_s1210 }}</td>
                   <td class="mono">{{ r.cpfs_s5002 }}</td>

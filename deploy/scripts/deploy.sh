@@ -46,10 +46,26 @@ $SUDO systemctl --no-pager --lines=10 status easy-esocial.service || true
 echo "==> 6.5 Sync nginx config (se mudou)"
 NGINX_SRC="$REPO_DIR/deploy/nginx/easyesocial.com.br.conf"
 NGINX_DST="/etc/nginx/sites-available/easyesocial.com.br.conf"
+NGINX_NEEDS_RELOAD=0
+
+# Remove confs antigos que conflitam com server_name easyesocial.com.br
+# (instalações manuais legadas: easy-social, easy-esocial, etc.)
+for old in /etc/nginx/sites-enabled/easy-social /etc/nginx/sites-enabled/easy-esocial /etc/nginx/sites-available/easy-social /etc/nginx/sites-available/easy-esocial; do
+    if [[ -e "$old" || -L "$old" ]]; then
+        echo "    removendo conf antigo: $old"
+        $SUDO rm -f "$old"
+        NGINX_NEEDS_RELOAD=1
+    fi
+done
+
 if [[ -f "$NGINX_SRC" ]] && ! cmp -s "$NGINX_SRC" "$NGINX_DST" 2>/dev/null; then
     echo "    nginx config mudou — atualizando"
     $SUDO cp "$NGINX_SRC" "$NGINX_DST"
     $SUDO ln -sf "$NGINX_DST" /etc/nginx/sites-enabled/easyesocial.com.br.conf
+    NGINX_NEEDS_RELOAD=1
+fi
+
+if [[ $NGINX_NEEDS_RELOAD -eq 1 ]]; then
     if $SUDO nginx -t; then
         $SUDO systemctl reload nginx
         echo "    nginx reload OK"

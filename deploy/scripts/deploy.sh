@@ -93,7 +93,11 @@ fi
 
 # DEBUG: print all active confs + grep client_max_body_size
 echo "    --- DEBUG nginx sites-enabled ---"
-$SUDO ls -la /etc/nginx/sites-enabled/ /etc/nginx/conf.d/ 2>&1 || true
+$SUDO ls -la /etc/nginx/sites-enabled/ 2>&1 || true
+echo "    --- DEBUG conf.d ---"
+$SUDO ls -la /etc/nginx/conf.d/ 2>&1 || true
+echo "    --- DEBUG quem tem easyesocial server_name ---"
+$SUDO grep -rl "easyesocial" /etc/nginx/ 2>/dev/null || true
 echo "    --- DEBUG client_max_body_size em nginx -T ---"
 $SUDO nginx -T 2>/dev/null | grep -i "client_max_body_size\|server_name" | head -30 || true
 

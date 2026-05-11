@@ -368,6 +368,9 @@ def reupload_zip(
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        print(f"[REUPLOAD ERROR zip_id={zip_id} tenant={empresa_id}]\n{tb}", flush=True)
         conn.rollback()
         if new_oid:
             try:
@@ -375,7 +378,7 @@ def reupload_zip(
                 conn.commit()
             except Exception:  # noqa: BLE001
                 pass
-        raise HTTPException(500, f"falha no reupload: {e}")
+        raise HTTPException(500, f"falha no reupload: {type(e).__name__}: {e} | TB(last): {tb.strip().splitlines()[-3:]}")
     finally:
         conn.close()
 

@@ -284,7 +284,8 @@ async function sincronizarFechamento() {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     await carregar();
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "Falha ao sincronizar fechamento";
+    error.value =
+      e instanceof Error ? e.message : "Falha ao sincronizar fechamento";
   }
 }
 
@@ -292,14 +293,20 @@ function tooltipFechamento(mes: MesLinha): string {
   const lines: string[] = [];
   if (mes.fechado) {
     lines.push("MÊS FECHADO (S-1299)");
-    if (mes.nr_recibo_fechamento) lines.push(`Recibo: ${mes.nr_recibo_fechamento}`);
-    if (mes.dt_fechamento) lines.push(`Fechado em: ${mes.dt_fechamento.slice(0, 19).replace("T", " ")}`);
+    if (mes.nr_recibo_fechamento)
+      lines.push(`Recibo: ${mes.nr_recibo_fechamento}`);
+    if (mes.dt_fechamento)
+      lines.push(
+        `Fechado em: ${mes.dt_fechamento.slice(0, 19).replace("T", " ")}`,
+      );
   } else {
     lines.push("MÊS ABERTO");
     if (mes.nr_recibo_abertura)
       lines.push(`Recibo S-1298 (reabertura): ${mes.nr_recibo_abertura}`);
     if (mes.dt_abertura)
-      lines.push(`Reaberto em: ${mes.dt_abertura.slice(0, 19).replace("T", " ")}`);
+      lines.push(
+        `Reaberto em: ${mes.dt_abertura.slice(0, 19).replace("T", " ")}`,
+      );
   }
   if (mes.fechamento_origem) lines.push(`Origem: ${mes.fechamento_origem}`);
   return lines.join("\n");
@@ -530,11 +537,21 @@ onMounted(() => {
         </div>
         <div v-if="empresaUsaLotesDinamicos" class="grid-th">Ações</div>
 
-        <div v-for="mes in overview.meses" :key="mes.per_apur" class="grid-row" :class="{ 'row-fechado': mes.fechado }">
+        <div
+          v-for="mes in overview.meses"
+          :key="mes.per_apur"
+          class="grid-row"
+          :class="{ 'row-fechado': mes.fechado }"
+        >
           <div class="cell-mes" :title="tooltipFechamento(mes)">
             <div class="cell-mes-label">
               {{ labelMes(mes.per_apur).label }}
-              <span v-if="mes.fechado" class="badge-fechado" title="Mês fechado (S-1299)">FECHADO</span>
+              <span
+                v-if="mes.fechado"
+                class="badge-fechado"
+                title="Mês fechado (S-1299)"
+                >FECHADO</span
+              >
             </div>
             <div class="cell-mes-sub">{{ mes.per_apur }}</div>
             <div
@@ -546,7 +563,10 @@ onMounted(() => {
                 :style="{ width: mesProgress(mes) + '%' }"
               ></div>
             </div>
-            <div v-if="mes.nr_recibo_fechamento && mes.fechado" class="cell-mes-recibo">
+            <div
+              v-if="mes.nr_recibo_fechamento && mes.fechado"
+              class="cell-mes-recibo"
+            >
               R: {{ mes.nr_recibo_fechamento.slice(-10) }}
             </div>
           </div>

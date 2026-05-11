@@ -539,15 +539,18 @@ def s1210_anual_overview(ano: int, empresa_id: int):
             info = fechamento_map.get(per, {})
             r99 = recibos_1299.get(per)
             r98 = recibos_1298.get(per)
-            # Estado real: comparar dt do ultimo S-1298 vs S-1299
-            estado_atual = info.get("fechado")
+            # Estado SOMENTE com base em evidencia real do eSocial
+            # (explorador_eventos). A tabela s1299_fechamento_status nao
+            # forca "fechado=true" — serve apenas como cache de recibos.
             if r99 and r98:
-                estado_atual = (r99["dt"] or "") >= (r98["dt"] or "")
+                fechado_real = (r99["dt"] or "") >= (r98["dt"] or "")
             elif r99:
-                estado_atual = True
+                fechado_real = True
             elif r98:
-                estado_atual = False
-            mes["fechado"] = bool(estado_atual) if estado_atual is not None else bool(info.get("fechado"))
+                fechado_real = False
+            else:
+                fechado_real = False
+            mes["fechado"] = fechado_real
             mes["nr_recibo_fechamento"] = (
                 (r99 or {}).get("nr_recibo") or info.get("nr_recibo_fechamento")
             )

@@ -45,9 +45,20 @@ interface OverviewAnual {
 }
 
 import { useEmpresaStore } from "@/stores/empresa";
+import { useAuthStore } from "@/stores/auth";
 
 const router = useRouter();
 const empresaStore = useEmpresaStore();
+const authStore = useAuthStore();
+
+function authHeaders(): Record<string, string> {
+  const h: Record<string, string> = { Accept: "application/json" };
+  const token = authStore.token;
+  if (token) h["Authorization"] = `Bearer ${token}`;
+  const cnpj = empresaStore.currentCnpj;
+  if (cnpj) h["X-Empresa-CNPJ"] = cnpj;
+  return h;
+}
 const ano = ref<number>(2025);
 const empresaId = computed<number>(() => empresaStore.currentId ?? 1);
 const overview = ref<OverviewAnual | null>(null);
@@ -280,7 +291,7 @@ async function sincronizarFechamento() {
   try {
     const r = await fetch(
       `/api/s1210-repo/anual/sync-fechamento?ano=${ano.value}&empresa_id=${empresaId.value}`,
-      { method: "POST" },
+      { method: "POST", headers: authHeaders() },
     );
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     await carregar();
@@ -301,7 +312,7 @@ async function toggleVirtual(mes: MesLinha) {
   try {
     const r = await fetch(
       `/api/s1210-repo/anual/marcar-virtual?per_apur=${encodeURIComponent(mes.per_apur)}&empresa_id=${empresaId.value}&fechar=${fechar}`,
-      { method: "POST" },
+      { method: "POST", headers: authHeaders() },
     );
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     await carregar();
@@ -418,12 +429,23 @@ onMounted(() => {
           </svg>
         </button>
         <button
-          class="icon-btn"
+          class="icon-btn icon-btn--lock"
           :disabled="loading"
           title="Sincronizar estado de fechamento (S-1299/S-1298) a partir dos eventos do eSocial"
           @click="sincronizarFechamento"
         >
-          🔒
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <rect x="4" y="11" width="16" height="10" rx="2" />
+            <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+            <circle cx="12" cy="16" r="1.2" fill="currentColor" />
+          </svg>
         </button>
         <button class="btn-power" :disabled="loading" @click="processarLotes">
           <svg
@@ -586,6 +608,7 @@ onMounted(() => {
               >
               <button
                 class="btn-virtual"
+                :class="{ 'btn-virtual--on': mes.virtual }"
                 :title="
                   mes.fechado && !mes.virtual
                     ? 'Mês já fechado oficialmente (S-1299) — não pode marcar virtual'
@@ -596,7 +619,30 @@ onMounted(() => {
                 :disabled="mes.fechado && !mes.virtual"
                 @click.stop="toggleVirtual(mes)"
               >
-                {{ mes.virtual ? "🔓" : "🔒" }}
+                <svg
+                  v-if="!mes.virtual"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <rect x="4" y="11" width="16" height="10" rx="2" />
+                  <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+                </svg>
+                <svg
+                  v-else
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <rect x="4" y="11" width="16" height="10" rx="2" />
+                  <path d="M8 11V7a4 4 0 0 1 7.5-1.5" />
+                </svg>
               </button>
             </div>
             <div class="cell-mes-sub">{{ mes.per_apur }}</div>
@@ -1577,27 +1623,66 @@ onMounted(() => {
 }
 .btn-virtual {
   margin-left: 6px;
-  background: transparent;
-  border: 1px solid rgba(34, 197, 94, 0.25);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(
+    135deg,
+    rgba(34, 197, 94, 0.08),
+    rgba(21, 128, 61, 0.04)
+  );
+  border: 1px solid rgba(34, 197, 94, 0.3);
   border-radius: 6px;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   padding: 0;
-  font-size: 11px;
-  line-height: 1;
   cursor: pointer;
-  color: #86efac;
+  color: #4ade80;
   vertical-align: middle;
-  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  transition: all 0.18s ease;
+  filter: drop-shadow(0 0 2px rgba(34, 197, 94, 0.25));
+}
+.btn-virtual svg {
+  width: 13px;
+  height: 13px;
+  stroke-width: 2.2;
 }
 .btn-virtual:hover:not(:disabled) {
-  background: rgba(34, 197, 94, 0.12);
-  border-color: rgba(34, 197, 94, 0.5);
-  transform: scale(1.08);
+  background: linear-gradient(
+    135deg,
+    rgba(34, 197, 94, 0.22),
+    rgba(21, 128, 61, 0.12)
+  );
+  border-color: rgba(34, 197, 94, 0.7);
+  color: #86efac;
+  transform: scale(1.1);
+  filter: drop-shadow(0 0 6px rgba(34, 197, 94, 0.55));
+}
+.btn-virtual--on {
+  background: linear-gradient(135deg, #22c55e, #15803d);
+  border-color: rgba(134, 239, 172, 0.6);
+  color: #f0fdf4;
+  filter: drop-shadow(0 0 6px rgba(34, 197, 94, 0.6));
+}
+.btn-virtual--on:hover:not(:disabled) {
+  background: linear-gradient(135deg, #16a34a, #14532d);
+  color: #ffffff;
 }
 .btn-virtual:disabled {
-  opacity: 0.25;
+  opacity: 0.2;
   cursor: not-allowed;
+  filter: none;
+}
+.icon-btn--lock {
+  color: #4ade80;
+}
+.icon-btn--lock:hover:not(:disabled) {
+  color: #86efac;
+  filter: drop-shadow(0 0 4px rgba(34, 197, 94, 0.5));
+}
+.icon-btn--lock svg {
+  width: 16px;
+  height: 16px;
 }
 .kpi-card.kpi-fechados {
   border-color: rgba(34, 197, 94, 0.35) !important;

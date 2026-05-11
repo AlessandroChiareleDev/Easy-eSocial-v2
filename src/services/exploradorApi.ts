@@ -352,8 +352,9 @@ export async function reuploadZip(
   });
 }
 
-export async function deletarZip(zipId: number) {
-  const r = await fetch(`${BASE}/api/explorador/zips/${zipId}`, {
+export async function deletarZip(zipId: number, empresaId?: number) {
+  const qs = empresaId !== undefined ? `?empresa_id=${empresaId}` : "";
+  const r = await fetch(`${BASE}/api/explorador/zips/${zipId}${qs}`, {
     method: "DELETE",
     headers: authHeaders(),
   });

@@ -210,10 +210,16 @@ async function disparaReupload(z: ZipRow) {
     reuploadAndamento.value = new Map(reuploadAndamento.value);
     extracaoErro.value.delete(z.id);
     try {
-      const r = await reuploadZip(z.id, file, forcar, (pct) => {
-        reuploadAndamento.value.set(z.id, pct);
-        reuploadAndamento.value = new Map(reuploadAndamento.value);
-      }, props.empresaId);
+      const r = await reuploadZip(
+        z.id,
+        file,
+        forcar,
+        (pct) => {
+          reuploadAndamento.value.set(z.id, pct);
+          reuploadAndamento.value = new Map(reuploadAndamento.value);
+        },
+        props.empresaId,
+      );
       emit("refresh");
       window.alert(
         `✅ RE-UPLOAD OK\n\n` +
@@ -233,10 +239,16 @@ async function disparaReupload(z: ZipRow) {
         );
         if (ok2) {
           try {
-            const r2 = await reuploadZip(z.id, file, true, (pct) => {
-              reuploadAndamento.value.set(z.id, pct);
-              reuploadAndamento.value = new Map(reuploadAndamento.value);
-            }, props.empresaId);
+            const r2 = await reuploadZip(
+              z.id,
+              file,
+              true,
+              (pct) => {
+                reuploadAndamento.value.set(z.id, pct);
+                reuploadAndamento.value = new Map(reuploadAndamento.value);
+              },
+              props.empresaId,
+            );
             emit("refresh");
             window.alert(
               `✅ RE-UPLOAD OK (forçado)\n\n` +
@@ -277,7 +289,7 @@ async function disparaExclusao(z: ZipRow) {
   excluindo.value.add(z.id);
   excluindo.value = new Set(excluindo.value);
   try {
-    await deletarZip(z.id);
+    await deletarZip(z.id, props.empresaId);
     emit("refresh");
   } catch (e) {
     window.alert(`Falha ao excluir: ${(e as Error).message}`);

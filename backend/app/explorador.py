@@ -388,23 +388,36 @@ def reupload_zip(
 
 
 @router.delete("/zips/{zip_id}")
-def deletar_zip(zip_id: int):
-    """Apaga zip + eventos indexados + Large Object do conteúdo."""
-    conn = db.connect()
+def deletar_zip(zip_id: int, empresa_id: Optional[int] = None):
+    """Apaga zip + eventos indexados + Large Object do conteúdo.
+
+    Multi-tenant: se `empresa_id` não vier, varre APPA e SOLUCOES até achar.
+    """
+    # 1) descobre em qual tenant o zip mora
+    tenants_a_tentar = [empresa_id] if empresa_id is not None else [tenant.APPA_ID, tenant.SOLUCOES_ID]
+    tenant_id_achado: Optional[int] = None
+    row = None
+    for eid in tenants_a_tentar:
+        with db.cursor(empresa_id=eid) as c:
+            c.execute(
+                """SELECT empresa_id, conteudo_oid, nome_arquivo_original,
+                          sha256, tamanho_bytes, total_xmls
+                   FROM empresa_zips_brutos WHERE id=%s""",
+                (zip_id,),
+            )
+            row = c.fetchone()
+            if row:
+                tenant_id_achado = eid
+                break
+    if not row or tenant_id_achado is None:
+        raise HTTPException(404, "zip não encontrado")
+
+    conn = db.connect(tenant_id_achado)
     info: dict = {}
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute(
-            """SELECT empresa_id, conteudo_oid, nome_arquivo_original,
-                      sha256, tamanho_bytes, total_xmls
-               FROM empresa_zips_brutos WHERE id=%s""",
-            (zip_id,),
-        )
-        row = cur.fetchone()
-        if not row:
-            raise HTTPException(404, "zip não encontrado")
         info = dict(row)
-        oid = int(row["conteudo_oid"])
+        oid = int(row["conteudo_oid"]) if row["conteudo_oid"] is not None else None
         # coleta xml_oid de cada evento para apagar os LOs depois
         cur.execute(
             "SELECT xml_oid FROM explorador_eventos "
@@ -415,8 +428,12 @@ def deletar_zip(zip_id: int):
         cur.execute("DELETE FROM explorador_eventos WHERE zip_id=%s", (zip_id,))
         n_evts = cur.rowcount
         cur.execute("DELETE FROM empresa_zips_brutos WHERE id=%s", (zip_id,))
-        # apaga LO do zip
-        storage.unlink_lo(conn, oid)
+        # apaga LO do zip (pode ja nao existir — tolera)
+        if oid is not None:
+            try:
+                storage.unlink_lo(conn, oid)
+            except Exception:  # noqa: BLE001
+                pass
         # apaga LOs por evento
         for x_oid in xml_oids:
             try:
@@ -434,7 +451,7 @@ def deletar_zip(zip_id: int):
     finally:
         conn.close()
     _log_atividade(
-        info["empresa_id"], "exclusao",
+        tenant_id_achado, "exclusao",
         zip_id=zip_id,
         nome_arquivo=info.get("nome_arquivo_original"),
         sha256=info.get("sha256"),

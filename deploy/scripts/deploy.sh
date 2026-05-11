@@ -91,6 +91,12 @@ else
     echo "    nginx config inalterada"
 fi
 
+# DEBUG: print all active confs + grep client_max_body_size
+echo "    --- DEBUG nginx sites-enabled ---"
+$SUDO ls -la /etc/nginx/sites-enabled/ /etc/nginx/conf.d/ 2>&1 || true
+echo "    --- DEBUG client_max_body_size em nginx -T ---"
+$SUDO nginx -T 2>/dev/null | grep -i "client_max_body_size\|server_name" | head -30 || true
+
 echo "==> 7. Smoke"
 # Antes do cutover, V2 só responde local. Depois do cutover, no domínio público.
 curl -sf http://127.0.0.1:8001/health || echo "    !! /health local falhou"

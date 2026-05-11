@@ -461,9 +461,10 @@ export async function reguaMes(empresaId: number, perApur: string) {
   );
 }
 
-export async function estadoEnvio(envioId: number) {
+export async function estadoEnvio(envioId: number, empresaId?: number) {
+  const qs = empresaId !== undefined ? `?empresa_id=${empresaId}` : "";
   return getJson<EstadoEnvioResp>(
-    `/api/explorador/timeline/envio/${envioId}/estado`,
+    `/api/explorador/timeline/envio/${envioId}/estado${qs}`,
   );
 }
 

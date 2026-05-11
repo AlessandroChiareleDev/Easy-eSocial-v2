@@ -109,7 +109,7 @@ async function carregarEstado() {
   if (!envioSelId.value) return;
   carregandoEstado.value = true;
   try {
-    estado.value = await estadoEnvio(envioSelId.value);
+    estado.value = await estadoEnvio(envioSelId.value, props.empresaId);
   } finally {
     carregandoEstado.value = false;
   }

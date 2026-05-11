@@ -88,8 +88,10 @@ def regua_mes(empresa_id: int, per_apur: str = Query(..., min_length=7, max_leng
 # 3) Estado de um envio (CPFs e status — para o grid)
 # ---------------------------------------------------------------------------
 @router.get("/envio/{envio_id}/estado")
-def estado_envio(envio_id: int):
-    with db.cursor() as c:
+def estado_envio(envio_id: int, empresa_id: int | None = None):
+    # Multi-tenant: sem empresa_id cai no default (APPA) e nao acha envios
+    # de outros tenants. Frontend deve passar ?empresa_id=N.
+    with db.cursor(empresa_id=empresa_id) as c:
         c.execute(
             """
             SELECT e.*, m.per_apur, m.empresa_id
@@ -230,8 +232,8 @@ def cadeia_cpf(
 download_router = APIRouter(prefix="/api/explorador", tags=["chain-walk-download"])
 
 
-def _stream_lo(oid: int, filename: str):
-    conn = db.connect()
+def _stream_lo(oid: int, filename: str, empresa_id: int | None = None):
+    conn = db.connect(empresa_id=empresa_id)
 
     def _gen():
         try:
@@ -251,8 +253,8 @@ def _stream_lo(oid: int, filename: str):
 
 
 @download_router.get("/tentativa/{item_id}/xml-enviado")
-def baixar_xml_enviado(item_id: int):
-    with db.cursor() as c:
+def baixar_xml_enviado(item_id: int, empresa_id: int | None = None):
+    with db.cursor(empresa_id=empresa_id) as c:
         c.execute(
             "SELECT cpf, xml_enviado_oid FROM timeline_envio_item WHERE id=%s",
             (item_id,),
@@ -262,12 +264,12 @@ def baixar_xml_enviado(item_id: int):
         raise HTTPException(404, "tentativa nao encontrada")
     if row.get("xml_enviado_oid") is None:
         raise HTTPException(404, "xml_enviado nao disponivel para esta tentativa")
-    return _stream_lo(row["xml_enviado_oid"], f"enviado_{row['cpf']}_item{item_id}.xml")
+    return _stream_lo(row["xml_enviado_oid"], f"enviado_{row['cpf']}_item{item_id}.xml", empresa_id=empresa_id)
 
 
 @download_router.get("/tentativa/{item_id}/xml-retorno")
-def baixar_xml_retorno(item_id: int):
-    with db.cursor() as c:
+def baixar_xml_retorno(item_id: int, empresa_id: int | None = None):
+    with db.cursor(empresa_id=empresa_id) as c:
         c.execute(
             "SELECT cpf, xml_retorno_oid FROM timeline_envio_item WHERE id=%s",
             (item_id,),
@@ -277,7 +279,7 @@ def baixar_xml_retorno(item_id: int):
         raise HTTPException(404, "tentativa nao encontrada")
     if row.get("xml_retorno_oid") is None:
         raise HTTPException(404, "xml_retorno nao disponivel para esta tentativa")
-    return _stream_lo(row["xml_retorno_oid"], f"retorno_{row['cpf']}_item{item_id}.xml")
+    return _stream_lo(row["xml_retorno_oid"], f"retorno_{row['cpf']}_item{item_id}.xml", empresa_id=empresa_id)
 
 
 # ---------------------------------------------------------------------------

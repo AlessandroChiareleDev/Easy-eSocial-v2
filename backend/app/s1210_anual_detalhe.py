@@ -1,16 +1,16 @@
 """GET /api/s1210-repo/anual/detalhe-cpf/{lote}/{per_apur}/{cpf}
 
-Porta direta do endpoint V1 `python-scripts/esocial/s1210_repo_routes.py:detalhe_cpf`
-para o V2. Mesma SHAPE de JSON (front pode ser reaproveitado 1:1).
+Porta do endpoint V1 `python-scripts/esocial/s1210_repo_routes.py:detalhe_cpf`
+para o V2 — mesma SHAPE de JSON do front, fontes adaptadas ao schema V2.
 
-Diferenças vs V1 (zero invenção, só substituição de fonte):
-  * V1 lê o ZIP do eSocial em disco a cada chamada (descompacta inteiro).
-    V2 lê de `explorador_eventos` (XML individual já isolado em LO),
-    aproveitando a indexação feita pelo Explorador no upload do ZIP.
-  * Chain walk: V1 varre vários ZIPs futuros. V2 faz UMA query SQL em
-    `explorador_eventos.referenciado_recibo` (já populado pelo extrator).
-  * Multi-tenant: usa `tenant.get_db_config_for_empresa(empresa_id)` —
-    mesmo padrão do overview anual já existente.
+Schema V2 (real, produção SOLUCOES):
+  * `s1210_cpf_scope`         — lista de CPFs por lote/per_apur
+  * `s1210_cpf_envios`        — histórico de envios c/ `pagamentos` e
+                                 `info_ir` JSONB já estruturados
+  * `s1210_cpf_recibo`        — recibos (zip/usado/esocial) por CPF
+  * `explorador_eventos`      — eventos S-1210/S-5002 com `dados_json` JSONB
+                                 (já parseado pelo Explorador). Não há
+                                 `xml_oid` nem `referenciado_recibo`.
 """
 from __future__ import annotations
 
@@ -20,11 +20,9 @@ from typing import Optional
 
 import psycopg2
 import psycopg2.extras
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, HTTPException, Query
 
 from . import tenant
-from .storage import open_lo
-from .xml_extractor import extrair_s1210
 
 log = logging.getLogger(__name__)
 
@@ -63,65 +61,22 @@ _TP_INFO_IR_LABELS = {
 }
 
 
-# ─── Parser S-5002 (copiado do V1 _parse_s5002_xml) ───────────────────
-def _parse_s5002_bytes(raw_bytes: bytes) -> Optional[dict]:
-    raw = raw_bytes.decode("utf-8", errors="replace")
-    m_cpf = re.search(r"<cpfBenef>([^<]+)</cpfBenef>", raw)
-    m_per = re.search(r"<perApur>([^<]+)</perApur>", raw)
-    m_id = re.search(r'Id="([^"]+)"', raw)
-    if not (m_cpf and m_per and m_id):
-        return None
-    rec = {
-        "cpf": m_cpf.group(1),
-        "per_apur": m_per.group(1),
-        "id": m_id.group(1),
-        "nr_recibo": "1.1." + m_id.group(1)[-19:],
-        "CRMen": None,
-        "vlrRendTrib": None,
-        "vlrPrevOficial": None,
-        "vlrCRMen": None,
-        "infoIR": [],
-        "vazio": False,
-    }
-    mc = re.search(
-        r"<consolidApurMen>.*?<CRMen>([^<]+)</CRMen>"
-        r".*?<vlrRendTrib>([^<]+)</vlrRendTrib>"
-        r".*?<vlrPrevOficial>([^<]+)</vlrPrevOficial>"
-        r".*?<vlrCRMen>([^<]+)</vlrCRMen>",
-        raw,
-        re.DOTALL,
-    )
-    if mc:
-        rec["CRMen"] = mc.group(1)
-        rec["vlrRendTrib"] = mc.group(2)
-        rec["vlrPrevOficial"] = mc.group(3)
-        rec["vlrCRMen"] = mc.group(4)
-    else:
-        rec["vazio"] = True
-    for tp, v in re.findall(
-        r"<infoIR><tpInfoIR>([^<]+)</tpInfoIR><valor>([^<]+)</valor></infoIR>",
-        raw,
-    ):
-        rec["infoIR"].append({"tpInfoIR": tp, "valor": v})
-    return rec
-
-
-def _read_lo_bytes(conn, oid: int) -> bytes:
-    """Lê o conteúdo inteiro de um Large Object como bytes."""
-    lo = open_lo(conn, int(oid))
-    try:
-        return lo.read()
-    finally:
-        lo.close()
-
-
 def _to_float(v) -> Optional[float]:
     if v is None:
         return None
+    s = str(v).strip()
+    if not s:
+        return None
     try:
-        return float(str(v).replace(",", "."))
+        return float(s.replace(",", "."))
     except (ValueError, TypeError):
         return None
+
+
+def _tpcr_short(tp_cr: Optional[str]) -> str:
+    """Reduz '056107' → '0561' para casar com _TP_CR_LABELS (V1)."""
+    s = str(tp_cr or "").strip()
+    return s[:4] if len(s) >= 4 else s
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -136,7 +91,12 @@ def detalhe_cpf(
 ):
     """Pacote completo de detalhes do CPF (pagamentos, IR, recibos, histórico).
 
-    Mantém SHAPE de resposta idêntica ao V1.
+    Mantém SHAPE de resposta idêntica ao V1. Fontes:
+      * pagamentos / info_ir_cr → último envio OK (`s1210_cpf_envios`),
+        fallback para `explorador_eventos` S-1210 (`dados_json`)
+      * S-5002 → `explorador_eventos` (`dados_json` já parseado)
+      * recibo ativo → `s1210_cpf_recibo` se houver; senão último S-1210
+        no explorador; senão `nr_recibo_novo` do último envio OK
     """
     if lote_num < 1:
         raise HTTPException(400, "lote_num inválido")
@@ -156,24 +116,23 @@ def detalhe_cpf(
             cur.execute(
                 """SELECT cpf, nome, matricula, lote_num, per_apur
                      FROM s1210_cpf_scope
-                    WHERE empresa_id=%s AND per_apur=%s AND lote_num=%s AND cpf=%s""",
+                    WHERE empresa_id=%s AND per_apur=%s
+                      AND lote_num=%s AND cpf=%s""",
                 (internal_id, per_apur, lote_num, cpf),
             )
             scope_row = cur.fetchone()
             if not scope_row:
-                # Fallback: CPF fora do scope mas pode existir no Explorador
-                # (ex.: rescisão, evento órfão, lote diferente). Retornamos
-                # mesmo assim para permitir auditoria pelo modal.
+                # Fallback: CPF fora do scope do lote pedido, mas existe na empresa
                 cur.execute(
-                    """SELECT nome FROM s1210_cpf_scope
+                    """SELECT nome, matricula FROM s1210_cpf_scope
                         WHERE empresa_id=%s AND cpf=%s LIMIT 1""",
                     (internal_id, cpf),
                 )
-                fallback = cur.fetchone()
+                fb = cur.fetchone()
                 scope_row = {
                     "cpf": cpf,
-                    "nome": (fallback or {}).get("nome"),
-                    "matricula": None,
+                    "nome": (fb or {}).get("nome"),
+                    "matricula": (fb or {}).get("matricula"),
                     "lote_num": lote_num,
                     "per_apur": per_apur,
                 }
@@ -182,21 +141,25 @@ def detalhe_cpf(
             cur.execute(
                 """SELECT status, codigo_resposta, descricao_resposta,
                           nr_recibo_usado, nr_recibo_novo, protocolo,
-                          erro_descricao, enviado_em
+                          erro_descricao, pagamentos, info_ir, enviado_em,
+                          duracao_ms
                      FROM s1210_cpf_envios
-                    WHERE empresa_id=%s AND per_apur=%s AND lote_num=%s AND cpf=%s
+                    WHERE empresa_id=%s AND per_apur=%s
+                      AND lote_num=%s AND cpf=%s
                     ORDER BY enviado_em DESC""",
                 (internal_id, per_apur, lote_num, cpf),
             )
             envios = list(cur.fetchall() or [])
 
+            ultimo_ok = next(
+                (e for e in envios if (e.get("status") or "") == "ok"), None
+            )
+
             # 3) S-1210 do Explorador — pega o mais recente (id DESC)
             cur.execute(
-                """SELECT id, nr_recibo, referenciado_recibo, dt_processamento,
-                          xml_oid
+                """SELECT id, nr_recibo, id_evento, dt_processamento, dados_json
                      FROM explorador_eventos
                     WHERE tipo_evento='S-1210' AND cpf=%s AND per_apur=%s
-                      AND xml_oid IS NOT NULL
                     ORDER BY id DESC
                     LIMIT 1""",
                 (cpf, per_apur),
@@ -204,152 +167,169 @@ def detalhe_cpf(
             s1210_row = cur.fetchone()
 
             zip_data: Optional[dict] = None
-            zip_erro: Optional[str] = None
             if s1210_row:
-                try:
-                    xml_bytes = _read_lo_bytes(conn, s1210_row["xml_oid"])
-                    extr = extrair_s1210(xml_bytes)
-                    # adapta nomes para shape V1
-                    info_ir_cr: list[dict] = []
-                    irc = extr.get("info_ir_complem") or {}
-                    for x in (irc.get("infoIRCR") or []):
-                        info_ir_cr.append(
-                            {"tpCR": x.get("tpCR"), "vrCR": x.get("vrCR")}
-                        )
-                    zip_data = {
-                        "info_pgtos": extr.get("info_pgtos") or [],
-                        "info_ir_cr": info_ir_cr,
-                        "nr_recibo": s1210_row.get("nr_recibo")
-                        or extr.get("nr_recibo_atual"),
-                        "ind_retif": extr.get("ind_retif_atual"),
-                        "dh_proc": (
-                            s1210_row["dt_processamento"].isoformat()
-                            if s1210_row.get("dt_processamento")
-                            else None
-                        ),
-                    }
-                except Exception as e:
-                    zip_erro = str(e)
-                    log.warning(
-                        "detalhe-cpf: falha ao parsear S-1210 para %s: %s", cpf, e
-                    )
+                dj = s1210_row.get("dados_json") or {}
+                info_pgtos = dj.get("pagamentos") or []
+                info_ir_cr = dj.get("infoIRCR") or []
+                # alguns S-1210 trazem o pagamento principal direto (sem array)
+                if not info_pgtos and dj.get("dtPgto"):
+                    info_pgtos = [{
+                        "vrLiq": dj.get("vrLiq"),
+                        "dtPgto": dj.get("dtPgto"),
+                        "perRef": dj.get("perRef") or per_apur,
+                        "tpPgto": dj.get("tpPgto"),
+                        "ideDmDev": dj.get("ideDmDev"),
+                    }]
+                if not info_ir_cr and dj.get("tpCR"):
+                    info_ir_cr = [{"tpCR": dj.get("tpCR"), "vrCR": dj.get("vrCR")}]
+                zip_data = {
+                    "info_pgtos": info_pgtos,
+                    "info_ir_cr": info_ir_cr,
+                    "nr_recibo": s1210_row.get("nr_recibo"),
+                    "ind_retif": dj.get("indRetif"),
+                    "dh_proc": (
+                        s1210_row["dt_processamento"].isoformat()
+                        if s1210_row.get("dt_processamento")
+                        else None
+                    ),
+                }
 
-            # 4) Chain walk — recibo ativo = nr_recibo que NÃO é referenciado por nenhum outro
+            # 4) Recibo ativo + cadeia
+            #    Como o V2 não tem `referenciado_recibo`, o recibo ativo é
+            #    o do registro mais recente (id DESC). Cadeia = qtd de
+            #    versões anteriores.
             recibo_ativo: Optional[str] = None
             recibo_fonte: Optional[str] = None
             cadeia_n = 0
-            if zip_data and zip_data.get("nr_recibo"):
-                try:
-                    cur.execute(
-                        """WITH evts AS (
-                              SELECT id, nr_recibo, referenciado_recibo
-                                FROM explorador_eventos
-                               WHERE tipo_evento='S-1210' AND cpf=%s AND per_apur=%s
-                                 AND nr_recibo IS NOT NULL
-                           )
-                           SELECT e.nr_recibo,
-                                  (SELECT COUNT(*) FROM evts) AS total
-                             FROM evts e
-                            WHERE NOT EXISTS (
-                                  SELECT 1 FROM evts e2
-                                   WHERE e2.referenciado_recibo = e.nr_recibo
-                            )
-                            ORDER BY e.id DESC
-                            LIMIT 1""",
-                        (cpf, per_apur),
-                    )
-                    r = cur.fetchone()
-                    if r:
-                        recibo_ativo = r["nr_recibo"]
-                        cadeia_n = max(int(r["total"]) - 1, 0)
-                        recibo_fonte = (
-                            "zip"
-                            if recibo_ativo == zip_data["nr_recibo"]
-                            else "cadeia"
-                        )
-                except Exception as e:
-                    log.warning(
-                        "detalhe-cpf: chain walk falhou para %s: %s", cpf, e
-                    )
 
-            # 5) Pagamentos com label
+            cur.execute(
+                """SELECT nr_recibo_esocial, nr_recibo_usado, nr_recibo_zip,
+                          fonte, dh_processamento_zip
+                     FROM s1210_cpf_recibo
+                    WHERE empresa_id=%s AND per_apur=%s AND cpf=%s
+                    LIMIT 1""",
+                (internal_id, per_apur, cpf),
+            )
+            rec_row = cur.fetchone()
+            if rec_row:
+                recibo_ativo = (
+                    rec_row.get("nr_recibo_esocial")
+                    or rec_row.get("nr_recibo_usado")
+                    or rec_row.get("nr_recibo_zip")
+                )
+                recibo_fonte = rec_row.get("fonte") or "s1210_cpf_recibo"
+
+            if not recibo_ativo and zip_data and zip_data.get("nr_recibo"):
+                recibo_ativo = zip_data["nr_recibo"]
+                recibo_fonte = "explorador"
+
+            if not recibo_ativo and ultimo_ok:
+                recibo_ativo = (
+                    ultimo_ok.get("nr_recibo_novo")
+                    or ultimo_ok.get("nr_recibo_usado")
+                )
+                recibo_fonte = "envio"
+
+            if s1210_row:
+                cur.execute(
+                    """SELECT COUNT(*) AS n
+                         FROM explorador_eventos
+                        WHERE tipo_evento='S-1210' AND cpf=%s AND per_apur=%s""",
+                    (cpf, per_apur),
+                )
+                rr = cur.fetchone()
+                cadeia_n = max(int((rr or {}).get("n") or 0) - 1, 0)
+
+            # 5) Pagamentos: preferir envio OK (já estruturado) → fallback explorador
             pagamentos: list[dict] = []
             total_liquido = 0.0
-            if zip_data and zip_data.get("info_pgtos"):
-                for p in zip_data["info_pgtos"]:
-                    tp = str(p.get("tpPgto") or "")
-                    vr = _to_float(p.get("vrLiq"))
-                    if vr is not None:
-                        total_liquido += vr
-                    pagamentos.append({
-                        "dt_pgto": p.get("dtPgto"),
-                        "tp_pgto": tp,
-                        "tp_pgto_label": _TP_PGTO_LABELS.get(tp, f"Tipo {tp}"),
-                        "per_ref": p.get("perRef"),
-                        "ide_dm_dev": p.get("ideDmDev"),
-                        "vr_liq": vr,
-                        "vr_liq_raw": p.get("vrLiq"),
-                    })
+            pgtos_src = None
+            if ultimo_ok and ultimo_ok.get("pagamentos"):
+                pgtos_src = ultimo_ok["pagamentos"]
+            elif zip_data and zip_data.get("info_pgtos"):
+                pgtos_src = zip_data["info_pgtos"]
 
-            # 6) infoIRCR do S-1210
+            for p in (pgtos_src or []):
+                tp = str(p.get("tpPgto") or "")
+                vr = _to_float(p.get("vrLiq"))
+                if vr is not None:
+                    total_liquido += vr
+                pagamentos.append({
+                    "dt_pgto": p.get("dtPgto"),
+                    "tp_pgto": tp,
+                    "tp_pgto_label": _TP_PGTO_LABELS.get(tp, f"Tipo {tp}"),
+                    "per_ref": p.get("perRef"),
+                    "ide_dm_dev": p.get("ideDmDev"),
+                    "vr_liq": vr,
+                    "vr_liq_raw": p.get("vrLiq"),
+                })
+
+            # 6) infoIRCR — preferir envio OK; fallback explorador
             ir_entries: list[dict] = []
-            if zip_data and zip_data.get("info_ir_cr"):
-                for ir in zip_data["info_ir_cr"]:
-                    tp = str(ir.get("tpCR") or "")
-                    vr = _to_float(ir.get("vrCR"))
-                    ir_entries.append({
-                        "tp_cr": tp,
-                        "tp_cr_label": _TP_CR_LABELS.get(tp, f"Código {tp}"),
-                        "vr_cr": vr,
-                        "vr_cr_raw": ir.get("vrCR"),
-                    })
+            ir_src = None
+            if ultimo_ok and ultimo_ok.get("info_ir"):
+                ir_src = ultimo_ok["info_ir"]
+            elif zip_data and zip_data.get("info_ir_cr"):
+                ir_src = zip_data["info_ir_cr"]
 
-            # 7) S-5002 do Explorador
+            for ir in (ir_src or []):
+                tp_full = str(ir.get("tpCR") or "")
+                tp = _tpcr_short(tp_full)
+                vr = _to_float(ir.get("vrCR"))
+                ir_entries.append({
+                    "tp_cr": tp_full,
+                    "tp_cr_label": _TP_CR_LABELS.get(tp, f"Código {tp_full}"),
+                    "vr_cr": vr,
+                    "vr_cr_raw": ir.get("vrCR"),
+                })
+
+            # 7) S-5002 do Explorador (dados_json já parseado)
             cur.execute(
-                """SELECT id, nr_recibo, xml_oid
+                """SELECT id, nr_recibo, id_evento, dados_json
                      FROM explorador_eventos
                     WHERE tipo_evento='S-5002' AND cpf=%s AND per_apur=%s
-                      AND xml_oid IS NOT NULL
-                    ORDER BY nr_recibo DESC, id DESC""",
+                    ORDER BY nr_recibo DESC NULLS LAST, id DESC""",
                 (cpf, per_apur),
             )
             s5002_rows = list(cur.fetchall() or [])
 
             s5002_list: list[dict] = []
             for r in s5002_rows:
-                try:
-                    raw = _read_lo_bytes(conn, r["xml_oid"])
-                    rec = _parse_s5002_bytes(raw)
-                    if not rec:
-                        continue
-                    s5002_list.append({
-                        "nr_recibo": r.get("nr_recibo") or rec.get("nr_recibo"),
-                        "id": rec.get("id"),
-                        "vazio": rec.get("vazio", False),
-                        "cr_men": rec.get("CRMen"),
-                        "vlr_rend_trib": _to_float(rec.get("vlrRendTrib")),
-                        "vlr_prev_oficial": _to_float(rec.get("vlrPrevOficial")),
-                        "vlr_ir_retido": _to_float(rec.get("vlrCRMen")),
-                        "info_ir": [
-                            {
-                                "tp_info_ir": it.get("tpInfoIR"),
-                                "tp_info_ir_label": _TP_INFO_IR_LABELS.get(
-                                    str(it.get("tpInfoIR")),
-                                    f"tpInfoIR {it.get('tpInfoIR')}",
-                                ),
-                                "valor": _to_float(it.get("valor")),
-                            }
-                            for it in (rec.get("infoIR") or [])
-                        ],
-                    })
-                except Exception as e:
-                    log.warning(
-                        "detalhe-cpf: falha ao parsear S-5002 id=%s: %s", r["id"], e
-                    )
+                dj = r.get("dados_json") or {}
+                cr_men = dj.get("totApurMen_CRMen")
+                vlr_rt = _to_float(dj.get("totApurMen_vlrRendTrib"))
+                vlr_po = _to_float(dj.get("totApurMen_vlrPrevOficial"))
+                vlr_cr = _to_float(dj.get("totApurMen_vlrCRMen"))
+                info_ir_list = dj.get("infoIR") or []
+                vazio = not (
+                    cr_men or vlr_rt or vlr_po or vlr_cr or info_ir_list
+                )
+                s5002_list.append({
+                    "nr_recibo": r.get("nr_recibo"),
+                    "id": r.get("id_evento"),
+                    "vazio": vazio,
+                    "cr_men": cr_men,
+                    "vlr_rend_trib": vlr_rt,
+                    "vlr_prev_oficial": vlr_po,
+                    "vlr_ir_retido": vlr_cr,
+                    "info_ir": [
+                        {
+                            "tp_info_ir": it.get("tpInfoIR"),
+                            "tp_info_ir_label": _TP_INFO_IR_LABELS.get(
+                                str(it.get("tpInfoIR")),
+                                f"tpInfoIR {it.get('tpInfoIR')}",
+                            ),
+                            "valor": _to_float(it.get("valor")),
+                        }
+                        for it in info_ir_list
+                    ],
+                })
 
-            # 8) S-5002 ativo: preferencialmente o vinculado ao recibo ativo
+            # 8) S-5002 ativo
             s5002_ativo: Optional[dict] = None
-            ativo_nr = recibo_ativo or (zip_data.get("nr_recibo") if zip_data else None)
+            ativo_nr = recibo_ativo or (
+                zip_data.get("nr_recibo") if zip_data else None
+            )
             if ativo_nr:
                 for s in s5002_list:
                     if s["nr_recibo"] == ativo_nr:
@@ -360,7 +340,9 @@ def detalhe_cpf(
                     if not s["vazio"]:
                         s5002_ativo = s
                         break
-            ir_retido_s5002 = s5002_ativo.get("vlr_ir_retido") if s5002_ativo else None
+            ir_retido_s5002 = (
+                s5002_ativo.get("vlr_ir_retido") if s5002_ativo else None
+            )
 
             # 9) IR efetivo (prioriza vrCR S-1210 quando > 0, senão S-5002)
             ir_efetivo_valor: Optional[float] = None
@@ -379,7 +361,7 @@ def detalhe_cpf(
 
             ultimo = envios[0] if envios else None
 
-            # CNPJ raiz do empregador (master_empresas) — mostra no cabeçalho
+            # CNPJ raiz do empregador
             cur.execute(
                 "SELECT cnpj FROM master_empresas WHERE id=%s",
                 (internal_id,),
@@ -394,10 +376,16 @@ def detalhe_cpf(
                 "lote_num": lote_num,
                 "per_apur": per_apur,
                 "zip_encontrado": bool(zip_data),
-                "zip_erro": zip_erro,
-                "ind_retif_original": zip_data.get("ind_retif") if zip_data else None,
-                "dh_processamento": zip_data.get("dh_proc") if zip_data else None,
-                "nr_recibo_zip": zip_data.get("nr_recibo") if zip_data else None,
+                "zip_erro": None,
+                "ind_retif_original": (
+                    zip_data.get("ind_retif") if zip_data else None
+                ),
+                "dh_processamento": (
+                    zip_data.get("dh_proc") if zip_data else None
+                ),
+                "nr_recibo_zip": (
+                    zip_data.get("nr_recibo") if zip_data else None
+                ),
                 "nr_recibo_ativo": recibo_ativo,
                 "recibo_fonte": recibo_fonte,
                 "cadeia_candidatos": cadeia_n,
@@ -423,7 +411,8 @@ def detalhe_cpf(
 
 # ═════════════════════════════════════════════════════════════════════
 # GET /anual/xml-cpf/{lote_num}/{per_apur}/{cpf}?tipo=S-1210|S-5002
-# Baixa o XML cru direto do Large Object (sem reabrir ZIP).
+# V2 NÃO armazena XMLs crus (apenas dados_json extraído).
+# Mantemos o endpoint para compatibilidade do front, retornando 410.
 # ═════════════════════════════════════════════════════════════════════
 @router.get("/anual/xml-cpf/{lote_num}/{per_apur}/{cpf}")
 def baixar_xml_cpf(
@@ -431,37 +420,13 @@ def baixar_xml_cpf(
     per_apur: str,
     cpf: str,
     empresa_id: int = Query(...),
-    tipo: str = Query("S-1210", regex=r"^S-(1210|5002)$"),
+    tipo: str = Query("S-1210", pattern=r"^S-(1210|5002)$"),
 ):
-    cpf = (cpf or "").strip().replace(".", "").replace("-", "")
-    if len(cpf) != 11 or not cpf.isdigit():
-        raise HTTPException(400, "CPF inválido")
-    if not re.fullmatch(r"\d{4}-\d{2}", per_apur or ""):
-        raise HTTPException(400, "per_apur inválido")
-
-    cfg = tenant.get_db_config_for_empresa(empresa_id)
-    conn = psycopg2.connect(**cfg)
-    try:
-        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute(
-                """SELECT xml_oid FROM explorador_eventos
-                    WHERE tipo_evento=%s AND cpf=%s AND per_apur=%s
-                      AND xml_oid IS NOT NULL
-                    ORDER BY id DESC LIMIT 1""",
-                (tipo, cpf, per_apur),
-            )
-            row = cur.fetchone()
-            if not row:
-                raise HTTPException(
-                    404, f"Nenhum {tipo} indexado para CPF {cpf} em {per_apur}"
-                )
-            data = _read_lo_bytes(conn, row["xml_oid"])
-    finally:
-        conn.close()
-
-    fname = f"{tipo}_{cpf}_{per_apur}.xml"
-    return Response(
-        content=data,
-        media_type="application/xml",
-        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            f"XML cru de {tipo} não está armazenado no V2 — apenas os dados "
+            "extraídos (dados_json) ficam no banco. Para o XML original, "
+            "consulte o ZIP do eSocial."
+        ),
     )

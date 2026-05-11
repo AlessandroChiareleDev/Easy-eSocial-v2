@@ -30,6 +30,7 @@ interface MesLinha {
   per_apur: string;
   lotes: Celula[];
   fechado?: boolean;
+  virtual?: boolean;
   nr_recibo_fechamento?: string | null;
   nr_recibo_abertura?: string | null;
   dt_fechamento?: string | null;
@@ -289,10 +290,36 @@ async function sincronizarFechamento() {
   }
 }
 
+async function toggleVirtual(mes: MesLinha) {
+  // Bloqueia toggle quando ja existe fechamento REAL (S-1299 do eSocial).
+  if (mes.fechado && !mes.virtual) return;
+  const fechar = !mes.virtual;
+  const msg = fechar
+    ? `Marcar ${mes.per_apur} como "virtualmente fechado"?\n\nIsso NAO envia S-1299 ao eSocial — apenas sinaliza visualmente que o mes esta concluido no Easy-Social.`
+    : `Remover marcacao "virtualmente fechado" de ${mes.per_apur}?`;
+  if (!window.confirm(msg)) return;
+  try {
+    const r = await fetch(
+      `/api/s1210-repo/anual/marcar-virtual?per_apur=${encodeURIComponent(mes.per_apur)}&empresa_id=${empresaId.value}&fechar=${fechar}`,
+      { method: "POST" },
+    );
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    await carregar();
+  } catch (e) {
+    error.value =
+      e instanceof Error ? e.message : "Falha ao marcar virtualmente fechado";
+  }
+}
+
 function tooltipFechamento(mes: MesLinha): string {
   const lines: string[] = [];
   if (mes.fechado) {
-    lines.push("MÊS FECHADO (S-1299)");
+    if (mes.virtual) {
+      lines.push("MÊS VIRTUALMENTE FECHADO");
+      lines.push("(marcação manual — não há S-1299 enviado ao eSocial)");
+    } else {
+      lines.push("MÊS FECHADO (S-1299)");
+    }
     if (mes.nr_recibo_fechamento)
       lines.push(`Recibo: ${mes.nr_recibo_fechamento}`);
     if (mes.dt_fechamento)
@@ -549,9 +576,28 @@ onMounted(() => {
               <span
                 v-if="mes.fechado"
                 class="badge-fechado"
-                title="Mês fechado (S-1299)"
-                >FECHADO</span
+                :class="{ 'badge-virtual': mes.virtual }"
+                :title="
+                  mes.virtual
+                    ? 'Virtualmente fechado (marcacao manual)'
+                    : 'Mês fechado (S-1299)'
+                "
+                >{{ mes.virtual ? "VIRTUAL" : "FECHADO" }}</span
               >
+              <button
+                class="btn-virtual"
+                :title="
+                  mes.fechado && !mes.virtual
+                    ? 'Mês já fechado oficialmente (S-1299) — não pode marcar virtual'
+                    : mes.virtual
+                      ? 'Remover marcação virtual'
+                      : 'Marcar como virtualmente fechado'
+                "
+                :disabled="mes.fechado && !mes.virtual"
+                @click.stop="toggleVirtual(mes)"
+              >
+                {{ mes.virtual ? "🔓" : "🔒" }}
+              </button>
             </div>
             <div class="cell-mes-sub">{{ mes.per_apur }}</div>
             <div
@@ -566,8 +612,13 @@ onMounted(() => {
             <div
               v-if="mes.nr_recibo_fechamento && mes.fechado"
               class="cell-mes-recibo"
+              :class="{ 'cell-mes-recibo-virtual': mes.virtual }"
             >
-              R: {{ mes.nr_recibo_fechamento.slice(-10) }}
+              {{
+                mes.virtual
+                  ? mes.nr_recibo_fechamento
+                  : "R: " + mes.nr_recibo_fechamento.slice(-10)
+              }}
             </div>
           </div>
 
@@ -1510,6 +1561,43 @@ onMounted(() => {
   color: rgba(134, 239, 172, 0.85);
   margin-top: 4px;
   letter-spacing: 0.05em;
+}
+.cell-mes-recibo-virtual {
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  color: #86efac;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.badge-fechado.badge-virtual {
+  background: linear-gradient(135deg, #22c55e, #15803d);
+  color: #f0fdf4;
+  border: 1px dashed rgba(240, 253, 244, 0.35);
+}
+.btn-virtual {
+  margin-left: 6px;
+  background: transparent;
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  border-radius: 6px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  color: #86efac;
+  vertical-align: middle;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+.btn-virtual:hover:not(:disabled) {
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.5);
+  transform: scale(1.08);
+}
+.btn-virtual:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
 }
 .kpi-card.kpi-fechados {
   border-color: rgba(34, 197, 94, 0.35) !important;

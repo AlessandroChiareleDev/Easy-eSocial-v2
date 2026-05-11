@@ -542,6 +542,11 @@ def s1210_anual_overview(ano: int, empresa_id: int):
             # Estado SOMENTE com base em evidencia real do eSocial
             # (explorador_eventos). A tabela s1299_fechamento_status nao
             # forca "fechado=true" — serve apenas como cache de recibos.
+            # EXCECAO: origem='virtual' marca fechamento manual ("virtualmente
+            # fechado"), tratado como fechado para fins visuais.
+            virtual_fechado = (
+                bool(info.get("fechado")) and info.get("fechamento_origem") == "virtual"
+            )
             if r99 and r98:
                 fechado_real = (r99["dt"] or "") >= (r98["dt"] or "")
             elif r99:
@@ -550,14 +555,23 @@ def s1210_anual_overview(ano: int, empresa_id: int):
                 fechado_real = False
             else:
                 fechado_real = False
-            mes["fechado"] = fechado_real
-            mes["nr_recibo_fechamento"] = (
-                (r99 or {}).get("nr_recibo") or info.get("nr_recibo_fechamento")
-            )
-            mes["dt_fechamento"] = (r99 or {}).get("dt") or info.get("fechamento_em")
+            fechado_final = fechado_real or virtual_fechado
+            mes["fechado"] = fechado_final
+            mes["virtual"] = virtual_fechado and not fechado_real
+            if fechado_real:
+                mes["nr_recibo_fechamento"] = (r99 or {}).get("nr_recibo") or info.get("nr_recibo_fechamento")
+                mes["dt_fechamento"] = (r99 or {}).get("dt") or info.get("fechamento_em")
+                mes["fechamento_origem"] = info.get("fechamento_origem")
+            elif virtual_fechado:
+                mes["nr_recibo_fechamento"] = "VIRTUALMENTE FECHADO"
+                mes["dt_fechamento"] = info.get("fechamento_em")
+                mes["fechamento_origem"] = "virtual"
+            else:
+                mes["nr_recibo_fechamento"] = None
+                mes["dt_fechamento"] = None
+                mes["fechamento_origem"] = info.get("fechamento_origem")
             mes["nr_recibo_abertura"] = (r98 or {}).get("nr_recibo")
             mes["dt_abertura"] = (r98 or {}).get("dt")
-            mes["fechamento_origem"] = info.get("fechamento_origem")
     finally:
         try:
             conn.close()
@@ -666,6 +680,68 @@ def s1210_sync_fechamento(ano: int, empresa_id: int):
         "total": len(atualizados),
         "atualizados": atualizados,
     }
+
+
+@s1210_repo_router.post("/anual/marcar-virtual")
+def s1210_marcar_virtual(per_apur: str, empresa_id: int, fechar: bool = True):
+    """Marca/desmarca um mes como 'virtualmente fechado'.
+
+    Quando `fechar=true`: UPSERT na s1299_fechamento_status com
+      origem='virtual', fechado=true, nr_recibo='VIRTUALMENTE FECHADO'.
+    Quando `fechar=false`: remove a marcacao virtual (DELETE se origem='virtual';
+      caso contrario nao mexe — preserva sync real).
+
+    O overview anual trata esses meses como fechados (badge FECHADO + brilho
+    verde), mas com o recibo exibido como "VIRTUALMENTE FECHADO".
+    """
+    from . import tenant
+    cfg = tenant.get_db_config_for_empresa(empresa_id)
+    internal_id = tenant.internal_empresa_id(empresa_id)
+
+    conn = psycopg2.connect(**cfg)
+    try:
+        with conn.cursor() as c:
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS s1299_fechamento_status (
+                  empresa_id    INT          NOT NULL,
+                  per_apur      VARCHAR(7)   NOT NULL,
+                  fechado       BOOLEAN      NOT NULL DEFAULT FALSE,
+                  protocolo     VARCHAR(100),
+                  nr_recibo     VARCHAR(100),
+                  confirmado_em TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+                  origem        VARCHAR(40)  DEFAULT 'sync',
+                  PRIMARY KEY (empresa_id, per_apur)
+                )
+            """)
+            if fechar:
+                c.execute(
+                    """
+                    INSERT INTO s1299_fechamento_status
+                          (empresa_id, per_apur, fechado, nr_recibo, origem, confirmado_em)
+                    VALUES (%s, %s, TRUE, 'VIRTUALMENTE FECHADO', 'virtual', NOW())
+                    ON CONFLICT (empresa_id, per_apur) DO UPDATE
+                       SET fechado       = TRUE,
+                           nr_recibo     = 'VIRTUALMENTE FECHADO',
+                           origem        = 'virtual',
+                           confirmado_em = NOW()
+                    """,
+                    (internal_id, per_apur),
+                )
+            else:
+                c.execute(
+                    """
+                    DELETE FROM s1299_fechamento_status
+                     WHERE empresa_id=%s AND per_apur=%s AND origem='virtual'
+                    """,
+                    (internal_id, per_apur),
+                )
+            conn.commit()
+    finally:
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
+    return {"ok": True, "per_apur": per_apur, "fechado": fechar, "origem": "virtual"}
 
 
 @s1210_repo_router.get("/cpfs-do-mes")

@@ -49,8 +49,16 @@ NGINX_DST="/etc/nginx/sites-available/easyesocial.com.br.conf"
 NGINX_NEEDS_RELOAD=0
 
 # Remove confs antigos que conflitam com server_name easyesocial.com.br
-# (instalações manuais legadas: easy-social, easy-esocial, etc.)
-for old in /etc/nginx/sites-enabled/easy-social /etc/nginx/sites-enabled/easy-esocial /etc/nginx/sites-available/easy-social /etc/nginx/sites-available/easy-esocial; do
+# (instalações manuais legadas: easy-social, easy-esocial, easyesocial.com.br SEM .conf, .v2.conf, etc.)
+for old in \
+    /etc/nginx/sites-enabled/easy-social \
+    /etc/nginx/sites-enabled/easy-esocial \
+    /etc/nginx/sites-available/easy-social \
+    /etc/nginx/sites-available/easy-esocial \
+    /etc/nginx/sites-enabled/easyesocial.com.br \
+    /etc/nginx/sites-available/easyesocial.com.br \
+    /etc/nginx/sites-enabled/easyesocial.com.br.v2.conf \
+    /etc/nginx/sites-available/easyesocial.com.br.v2.conf; do
     if [[ -e "$old" || -L "$old" ]]; then
         echo "    removendo conf antigo: $old"
         $SUDO rm -f "$old"

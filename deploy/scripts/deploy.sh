@@ -43,6 +43,23 @@ $SUDO systemctl restart easy-esocial.service
 sleep 2
 $SUDO systemctl --no-pager --lines=10 status easy-esocial.service || true
 
+echo "==> 6.5 Sync nginx config (se mudou)"
+NGINX_SRC="$REPO_DIR/deploy/nginx/easyesocial.com.br.conf"
+NGINX_DST="/etc/nginx/sites-available/easyesocial.com.br.conf"
+if [[ -f "$NGINX_SRC" ]] && ! cmp -s "$NGINX_SRC" "$NGINX_DST" 2>/dev/null; then
+    echo "    nginx config mudou — atualizando"
+    $SUDO cp "$NGINX_SRC" "$NGINX_DST"
+    $SUDO ln -sf "$NGINX_DST" /etc/nginx/sites-enabled/easyesocial.com.br.conf
+    if $SUDO nginx -t; then
+        $SUDO systemctl reload nginx
+        echo "    nginx reload OK"
+    else
+        echo "    !! nginx -t falhou — config NAO aplicada"
+    fi
+else
+    echo "    nginx config inalterada"
+fi
+
 echo "==> 7. Smoke"
 # Antes do cutover, V2 só responde local. Depois do cutover, no domínio público.
 curl -sf http://127.0.0.1:8001/health || echo "    !! /health local falhou"

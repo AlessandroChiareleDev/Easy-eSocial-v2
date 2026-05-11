@@ -504,7 +504,21 @@ onMounted(() => {
         </div>
       </div>
       <div class="kpi-card kpi-fechados" v-if="resumo.mesesFechados > 0">
-        <div class="kpi-label">🔒 Meses fechados</div>
+        <div class="kpi-label">
+          <svg
+            class="kpi-lock-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <rect x="4" y="11" width="16" height="10" rx="2" />
+            <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+          </svg>
+          Meses fechados
+        </div>
         <div class="kpi-value">
           {{ resumo.mesesFechados }} <span class="kpi-divider">/</span> 12
         </div>
@@ -1690,5 +1704,14 @@ onMounted(() => {
 }
 .kpi-card.kpi-fechados .kpi-value {
   color: #86efac;
+}
+.kpi-lock-icon {
+  width: 12px;
+  height: 12px;
+  display: inline-block;
+  vertical-align: -1px;
+  margin-right: 4px;
+  color: #4ade80;
+  filter: drop-shadow(0 0 2px rgba(34, 197, 94, 0.4));
 }
 </style>

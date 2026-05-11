@@ -65,6 +65,21 @@ if [[ -f "$NGINX_SRC" ]] && ! cmp -s "$NGINX_SRC" "$NGINX_DST" 2>/dev/null; then
     NGINX_NEEDS_RELOAD=1
 fi
 
+# Sync conf.d/ (limites globais — vence qualquer server block legado)
+CONFD_SRC_DIR="$REPO_DIR/deploy/nginx/conf.d"
+if [[ -d "$CONFD_SRC_DIR" ]]; then
+    for src in "$CONFD_SRC_DIR"/*.conf; do
+        [[ -f "$src" ]] || continue
+        name=$(basename "$src")
+        dst="/etc/nginx/conf.d/$name"
+        if ! cmp -s "$src" "$dst" 2>/dev/null; then
+            echo "    conf.d/$name mudou — atualizando"
+            $SUDO cp "$src" "$dst"
+            NGINX_NEEDS_RELOAD=1
+        fi
+    done
+fi
+
 if [[ $NGINX_NEEDS_RELOAD -eq 1 ]]; then
     if $SUDO nginx -t; then
         $SUDO systemctl reload nginx

@@ -240,8 +240,12 @@ export async function resumoZip(zipId: number) {
   return getJson<ResumoZip>(`/api/explorador/zips/${zipId}/resumo`);
 }
 
-export async function extrairZip(zipId: number) {
-  return postJson<ExtractOk>(`/api/explorador/zips/${zipId}/extrair`);
+export async function extrairZip(
+  zipId: number,
+  opts?: { somenteS5002?: boolean },
+) {
+  const qs = opts?.somenteS5002 ? "?somente_s5002=true" : "";
+  return postJson<ExtractOk>(`/api/explorador/zips/${zipId}/extrair${qs}`);
 }
 
 export async function deletarZip(zipId: number) {

@@ -35,6 +35,31 @@ async function disparaExtracao(z: ZipRow) {
   }
 }
 
+async function disparaReextrairS5002(z: ZipRow) {
+  const ok = window.confirm(
+    `Re-extrair APENAS S-5002 deste zip?\n\n` +
+      `• ${z.nome_arquivo_original}\n` +
+      `• ${z.perapur_dominante ?? z.dt_ini.slice(0, 7)}\n\n` +
+      `Os eventos S-1210 NÃO serão tocados (nem inseridos, nem ` +
+      `atualizados). Apenas o dados_json dos S-5002 será enriquecido ` +
+      `com infoIR e totais consolidados.`,
+  );
+  if (!ok) return;
+  extraindo.value.add(z.id);
+  extracaoErro.value.delete(z.id);
+  extraindo.value = new Set(extraindo.value);
+  try {
+    await extrairZip(z.id, { somenteS5002: true });
+    emit("refresh");
+  } catch (e) {
+    extracaoErro.value.set(z.id, (e as Error).message);
+    extracaoErro.value = new Map(extracaoErro.value);
+  } finally {
+    extraindo.value.delete(z.id);
+    extraindo.value = new Set(extraindo.value);
+  }
+}
+
 async function disparaExclusao(z: ZipRow) {
   const ok = window.confirm(
     `Excluir definitivamente este zip?\n\n` +
@@ -170,6 +195,15 @@ const zipsOrdenados = computed(() =>
         <a class="btn-ghost" :href="urlDownloadZip(z.id)" download>
           ⬇ Baixar zip
         </a>
+        <button
+          v-if="z.extracao_status === 'ok'"
+          class="btn-ghost"
+          :disabled="extraindo.has(z.id)"
+          @click="disparaReextrairS5002(z)"
+          :title="'Reextrai apenas S-5002 (não toca S-1210). Útil para mês já enviado.'"
+        >
+          {{ extraindo.has(z.id) ? "… re-extraindo" : "🔄 Só S-5002" }}
+        </button>
         <button
           class="btn-danger"
           :disabled="excluindo.has(z.id)"

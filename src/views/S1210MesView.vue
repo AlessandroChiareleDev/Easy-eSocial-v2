@@ -444,7 +444,9 @@ function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
             <div class="modal-kicker">Detalhes do envio · S-1210</div>
             <h2 v-if="detalhe">
               {{ fmtCpf(detalhe.cpf) }}
-              <span v-if="detalhe.nome" class="head-nome">· {{ detalhe.nome }}</span>
+              <span v-if="detalhe.nome" class="head-nome"
+                >· {{ detalhe.nome }}</span
+              >
             </h2>
             <h2 v-else>Carregando…</h2>
           </div>
@@ -470,7 +472,10 @@ function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
               <span v-if="detalhe.qtd_envios > 1" class="badge badge--hist">
                 {{ detalhe.qtd_envios }} envios
               </span>
-              <span v-if="detalhe.ind_retif_original === '2'" class="badge badge--ret">
+              <span
+                v-if="detalhe.ind_retif_original === '2'"
+                class="badge badge--ret"
+              >
                 Retificação (indRetif=2)
               </span>
             </div>
@@ -488,7 +493,9 @@ function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
                 <dt>Competência</dt>
                 <dd>{{ tituloMes }}</dd>
                 <dt>Empregador</dt>
-                <dd class="mono">CNPJ raiz {{ detalhe.empregador_cnpj_raiz || "—" }}</dd>
+                <dd class="mono">
+                  CNPJ raiz {{ detalhe.empregador_cnpj_raiz || "—" }}
+                </dd>
               </dl>
             </section>
 
@@ -620,9 +627,7 @@ function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
               </div>
 
               <table
-                v-if="
-                  detalhe.s5002_ativo && detalhe.s5002_ativo.info_ir.length
-                "
+                v-if="detalhe.s5002_ativo && detalhe.s5002_ativo.info_ir.length"
                 class="det-table"
                 style="margin-top: 0.75rem"
               >
@@ -634,10 +639,7 @@ function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr
-                    v-for="(it, i) in detalhe.s5002_ativo.info_ir"
-                    :key="i"
-                  >
+                  <tr v-for="(it, i) in detalhe.s5002_ativo.info_ir" :key="i">
                     <td class="mono">{{ it.tp_info_ir }}</td>
                     <td>{{ it.tp_info_ir_label }}</td>
                     <td class="rt">{{ fmtMoney(it.valor) }}</td>
@@ -650,9 +652,7 @@ function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
             <section v-if="detalhe.info_ir.length" class="det-sec">
               <h3 class="det-sec-t">
                 🧾 infoIRCR (do S-1210)
-                <span class="det-sec-sub"
-                  >declaração complementar enviada</span
-                >
+                <span class="det-sec-sub">declaração complementar enviada</span>
               </h3>
               <table class="det-table">
                 <thead>
@@ -680,10 +680,7 @@ function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
             </section>
 
             <!-- Histórico de envios -->
-            <section
-              v-if="detalhe.historico_envios.length"
-              class="det-sec"
-            >
+            <section v-if="detalhe.historico_envios.length" class="det-sec">
               <h3 class="det-sec-t">
                 🕒 Histórico de envios
                 <span class="det-sec-sub"
@@ -698,7 +695,9 @@ function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
                 >
                   <div class="tl-body">
                     <div class="tl-top">
-                      <span :class="classeStatus(h.status)">{{ h.status }}</span>
+                      <span :class="classeStatus(h.status)">{{
+                        h.status
+                      }}</span>
                       <span class="tl-data">{{ fmtData(h.enviado_em) }}</span>
                       <span v-if="h.codigo_resposta" class="pill pill--cod">
                         código {{ h.codigo_resposta }}

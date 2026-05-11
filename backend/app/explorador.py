@@ -360,12 +360,17 @@ def download_zip(zip_id: int):
 # Extração
 # ---------------------------------------------------------------------------
 
-def _extrair_zip_sync(zip_id: int) -> dict:
+def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False) -> dict:
     """Lê o zip do Large Object e popula explorador_eventos.
 
     Usa DUAS conexões:
       - conn_lo: mantida em transação aberta para o Large Object permanecer válido.
       - conn_db: para INSERTs/UPDATEs com commits/rollbacks livres.
+
+    Parametros:
+      somente_s5002: se True, IGNORA totalmente eventos S-1210 (nem insere
+        nem atualiza). Útil para re-extrair um ZIP de mês já enviado e
+        enriquecer só o S-5002, sem risco de tocar nos S-1210.
     """
     conn_db = db.connect()
     conn_lo = db.connect()
@@ -421,6 +426,10 @@ def _extrair_zip_sync(zip_id: int) -> dict:
                         if evt is None:
                             falhas += 1
                             continue
+                        # Modo "somente S-5002": pula totalmente qualquer
+                        # evento que não seja S-5002 (S-1210 e demais).
+                        if somente_s5002 and evt.tipo_evento != "S-5002":
+                            continue
                         if evt.per_apur:
                             per_counter[evt.per_apur] = per_counter.get(evt.per_apur, 0) + 1
                         # cria 1 Large Object por evento (xml_oid).
@@ -436,6 +445,37 @@ def _extrair_zip_sync(zip_id: int) -> dict:
                             x_lo.close()
                         x_size = len(data)
                         x_sha = _hl.sha256(data).hexdigest()
+                        # Enriquece dados_json para S-1210 e S-5002 com os
+                        # campos lidos do XML (pagamentos, infoIRCR, etc.) —
+                        # demais eventos seguem com {nome_tecnico} apenas.
+                        dados_json_payload: dict = {"nome_tecnico": evt.nome_tecnico}
+                        try:
+                            if evt.tipo_evento == "S-1210":
+                                from .xml_extractor import extrair_s1210 as _ex_s1210
+                                d = _ex_s1210(data) or {}
+                                dados_json_payload.update({
+                                    "pagamentos": d.get("info_pgtos") or [],
+                                    "infoIRCR": (d.get("info_ir_complem") or {}).get("infoIRCR") or [],
+                                    "planSaude": d.get("plan_saude"),
+                                    "indRetif": d.get("ind_retif_atual"),
+                                    "nrReciboAtual": d.get("nr_recibo_atual"),
+                                })
+                            elif evt.tipo_evento == "S-5002":
+                                from .xml_extractor import extrair_s5002 as _ex_s5002
+                                d = _ex_s5002(data) or {}
+                                dados_json_payload.update({
+                                    "infoIR": d.get("infoIR") or [],
+                                    "totApurMen_CRMen": d.get("totApurMen_CRMen"),
+                                    "totApurMen_vlrRendTrib": d.get("totApurMen_vlrRendTrib"),
+                                    "totApurMen_vlrPrevOficial": d.get("totApurMen_vlrPrevOficial"),
+                                    "totApurMen_vlrCRMen": d.get("totApurMen_vlrCRMen"),
+                                })
+                        except Exception as _ex_enrich:  # noqa: BLE001
+                            # Falha de enriquecimento não derruba indexação;
+                            # mantemos pelo menos {nome_tecnico} pra não
+                            # quebrar inserts existentes.
+                            print(f"[WARN] enrich dados_json ({evt.tipo_evento}): {_ex_enrich}")
+
                         with conn_db.cursor() as cur2:
                             cur2.execute(
                                 """
@@ -446,8 +486,19 @@ def _extrair_zip_sync(zip_id: int) -> dict:
                                    zip_id, xml_entry_name, referenciado_recibo,
                                    xml_oid, xml_size_bytes, xml_sha256)
                                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                                ON CONFLICT (id_evento) WHERE id_evento IS NOT NULL DO NOTHING
-                                RETURNING id
+                                ON CONFLICT (id_evento) WHERE id_evento IS NOT NULL DO UPDATE
+                                  SET dados_json = EXCLUDED.dados_json
+                                  WHERE explorador_eventos.tipo_evento IN ('S-1210','S-5002')
+                                    AND (
+                                      explorador_eventos.dados_json IS NULL
+                                      OR NOT (
+                                        explorador_eventos.dados_json ? 'pagamentos'
+                                        OR explorador_eventos.dados_json ? 'infoIRCR'
+                                        OR explorador_eventos.dados_json ? 'infoIR'
+                                        OR explorador_eventos.dados_json ? 'totApurMen_CRMen'
+                                      )
+                                    )
+                                RETURNING id, (xmax = 0) AS inserted_new
                                 """,
                                 (
                                     importacao_id,
@@ -459,7 +510,7 @@ def _extrair_zip_sync(zip_id: int) -> dict:
                                     evt.dt_processamento,
                                     evt.cd_resposta,
                                     name,
-                                    json.dumps({"nome_tecnico": evt.nome_tecnico}),
+                                    json.dumps(dados_json_payload),
                                     zip_id,
                                     name,
                                     evt.referenciado_recibo,
@@ -468,11 +519,23 @@ def _extrair_zip_sync(zip_id: int) -> dict:
                                     x_sha,
                                 ),
                             )
-                            inserted = cur2.fetchone()
-                        if inserted is None:
+                            row_ret = cur2.fetchone()
+                        # RETURNING devolve linha em INSERT e em UPDATE; só
+                        # devolve None se o ON CONFLICT bater no WHERE e
+                        # filtrar (linha já tinha dados_json rico).
+                        # row_ret é tupla: (id, inserted_new_bool)
+                        inserted = bool(row_ret and row_ret[1])
+                        if row_ret is None:
+                            # já existia e dados_json já era rico → duplicado puro
                             duplicados += 1
-                            # houve conflito - o LO criado virou orfao,
-                            # remove para nao deixar lixo
+                            try:
+                                storage.unlink_lo(conn_w, x_oid)
+                            except Exception:  # noqa: BLE001
+                                pass
+                        elif not inserted:
+                            # UPDATE (enriqueceu dados_json de linha antiga)
+                            duplicados += 1
+                            # LO criado virou órfão (linha antiga já tem xml_oid)
                             try:
                                 storage.unlink_lo(conn_w, x_oid)
                             except Exception:  # noqa: BLE001
@@ -576,9 +639,14 @@ def _extrair_zip_sync(zip_id: int) -> dict:
 
 
 @router.post("/zips/{zip_id}/extrair")
-def extrair_zip(zip_id: int):
-    """Extração SÍNCRONA (MVP). Pode demorar para zips grandes."""
-    res = _extrair_zip_sync(zip_id)
+def extrair_zip(zip_id: int, somente_s5002: bool = False):
+    """Extração SÍNCRONA (MVP). Pode demorar para zips grandes.
+
+    Query param `somente_s5002=true`: ignora completamente eventos S-1210
+    (não insere nem atualiza). Útil para re-extrair um ZIP de mês já
+    enviado e enriquecer apenas o S-5002 sem risco de tocar nos S-1210.
+    """
+    res = _extrair_zip_sync(zip_id, somente_s5002=somente_s5002)
     # log de atividade (best-effort)
     try:
         with db.cursor() as c:
@@ -601,6 +669,7 @@ def extrair_zip(zip_id: int):
                     "duplicados_id_evento": res.get("duplicados_id_evento"),
                     "falhas": res.get("falhas"),
                     "perapur_dominante": res.get("perapur_dominante"),
+                    "somente_s5002": somente_s5002,
                 },
             )
     except Exception:  # noqa: BLE001

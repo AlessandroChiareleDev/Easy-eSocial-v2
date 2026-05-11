@@ -128,3 +128,67 @@ def extrair_s1210(xml_bytes: bytes) -> dict:
         "nr_recibo_atual": nr_recibo_atual,
         "ind_retif_atual": ind_retif,
     }
+
+
+def extrair_s5002(xml_bytes: bytes) -> dict:
+    """Extrai campos do S-5002 (evtIrrfBenefRet, retorno consolidado de IR).
+
+    Devolve dict com chaves usadas pelo modal do S-1210 Anual:
+      cpfBenef
+      perApur                       ('AAAA-MM')
+      id_evento
+      infoIR  [{ tpInfoIR, valor }]
+      totApurMen_CRMen, totApurMen_vlrRendTrib,
+      totApurMen_vlrPrevOficial, totApurMen_vlrCRMen
+    """
+    root = etree.fromstring(xml_bytes)
+    evt_list = root.xpath('//*[local-name()="evtIrrfBenefRet"]')
+    if not evt_list:
+        return {}
+    evt = evt_list[0]
+    id_ev = evt.attrib.get("Id")
+
+    ide_evento = evt.xpath('./*[local-name()="ideEvento"]')
+    ide_benef = evt.xpath('./*[local-name()="ideTrabalhador"]') or evt.xpath('./*[local-name()="ideBenef"]')
+
+    per_apur = None
+    if ide_evento:
+        per_apur = _txt(ide_evento[0], './*[local-name()="perApur"]')
+
+    cpf_benef = None
+    if ide_benef:
+        cpf_benef = (
+            _txt(ide_benef[0], './*[local-name()="cpfBenef"]')
+            or _txt(ide_benef[0], './*[local-name()="cpfTrab"]')
+        )
+
+    info_ir_list: list[dict] = []
+    for ii in evt.xpath('.//*[local-name()="infoIR"]'):
+        tp = _txt(ii, './*[local-name()="tpInfoIR"]')
+        vl = _txt(ii, './*[local-name()="valor"]')
+        if tp is None and vl is None:
+            continue
+        info_ir_list.append({"tpInfoIR": tp, "valor": vl})
+
+    cr_men = None
+    vlr_rend_trib = None
+    vlr_prev_oficial = None
+    vlr_cr_men = None
+    consolid = evt.xpath('.//*[local-name()="consolidApurMen"]')
+    if consolid:
+        c = consolid[0]
+        cr_men = _txt(c, './*[local-name()="CRMen"]')
+        vlr_rend_trib = _txt(c, './*[local-name()="vlrRendTrib"]')
+        vlr_prev_oficial = _txt(c, './*[local-name()="vlrPrevOficial"]')
+        vlr_cr_men = _txt(c, './*[local-name()="vlrCRMen"]')
+
+    return {
+        "id_evento": id_ev,
+        "cpfBenef": cpf_benef,
+        "perApur": per_apur,
+        "infoIR": info_ir_list,
+        "totApurMen_CRMen": cr_men,
+        "totApurMen_vlrRendTrib": vlr_rend_trib,
+        "totApurMen_vlrPrevOficial": vlr_prev_oficial,
+        "totApurMen_vlrCRMen": vlr_cr_men,
+    }

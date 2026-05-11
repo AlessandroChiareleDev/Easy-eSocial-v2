@@ -264,6 +264,7 @@ def reupload_zip(
     #    (multi-tenant: cada empresa tem seu próprio DB, então db.cursor() default = APPA).
     tenants_a_tentar = [empresa_id] if empresa_id is not None else [tenant.APPA_ID, tenant.SOLUCOES_ID]
     row = None
+    tenant_id_achado: Optional[int] = None
     for eid in tenants_a_tentar:
         with db.cursor(empresa_id=eid) as c:
             c.execute(
@@ -274,11 +275,14 @@ def reupload_zip(
             )
             row = c.fetchone()
             if row:
+                tenant_id_achado = eid
                 break
-    if not row:
+    if not row or tenant_id_achado is None:
         raise HTTPException(404, "zip não encontrado")
 
-    empresa_id = row["empresa_id"]
+    # IMPORTANTE: usar tenant_id_achado pra conectar, NÃO row["empresa_id"]
+    # (no BD SOLUCOES, rows guardam empresa_id=1 internamente — convenção do tenant.py)
+    empresa_id = tenant_id_achado
     old_oid = int(row["conteudo_oid"]) if row["conteudo_oid"] is not None else None
     sha_esperado = row["sha256"]
     tam_esperado = row["tamanho_bytes"]

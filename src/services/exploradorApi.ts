@@ -242,7 +242,7 @@ export async function resumoZip(zipId: number) {
 
 export async function extrairZip(
   zipId: number,
-  opts?: { somenteS5002?: boolean; empresaId?: number },
+  opts?: { somenteS5002?: boolean; empresaId?: number | undefined },
 ) {
   const params = new URLSearchParams();
   if (opts?.somenteS5002) params.set("somente_s5002", "true");

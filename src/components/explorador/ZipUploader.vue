@@ -19,7 +19,29 @@ type Phase = "idle" | "uploading" | "finalizing" | "extraindo" | "ok" | "erro";
 
 const dragOver = ref(false);
 const fileInput = ref<HTMLInputElement | null>(null);
-const file = ref<File | null>(null);
+
+// MULTI-ARQUIVO: lista de arquivos selecionados (todos vao para o mesmo periodo)
+const files = ref<File[]>([]);
+// Indice do arquivo atualmente em upload (0-based). Total = files.value.length
+const currentIdx = ref(0);
+// Resultado por arquivo (para mostrar resumo no fim)
+interface FileResult {
+  nome: string;
+  ok: boolean;
+  zip_id?: number;
+  erro?: string;
+  duplicado?: boolean;
+}
+const resultados = ref<FileResult[]>([]);
+
+// Compat: alguns trechos do template ainda referenciam "file"
+const file = computed<File | null>(
+  () => files.value[currentIdx.value] ?? files.value[0] ?? null,
+);
+const total = computed(() => files.value.length);
+const progressoLote = computed(() =>
+  total.value > 1 ? `Arquivo ${currentIdx.value + 1} de ${total.value}` : "",
+);
 
 // período padrão = mês corrente
 const today = new Date();
@@ -39,6 +61,8 @@ const handle = ref<UploadHandle | null>(null);
 const peakRate = ref(0);
 
 let pollTimer: number | null = null;
+// Flag para cancelar o loop sequencial
+let cancelLoop = false;
 
 const acceptZip = ".zip,application/zip,application/x-zip-compressed";
 
@@ -48,26 +72,40 @@ function pickFile() {
 
 function onFileChange(e: Event) {
   const t = e.target as HTMLInputElement;
-  if (t.files && t.files[0]) selectFile(t.files[0]);
+  if (t.files && t.files.length > 0) selectFiles(t.files);
   t.value = "";
 }
 
 function onDrop(e: DragEvent) {
   e.preventDefault();
   dragOver.value = false;
-  const f = e.dataTransfer?.files?.[0];
-  if (f) selectFile(f);
+  const fs = e.dataTransfer?.files;
+  if (fs && fs.length > 0) selectFiles(fs);
 }
 
-function selectFile(f: File) {
-  if (!f.name.toLowerCase().endsWith(".zip")) {
-    errorMsg.value = "Só aceita arquivo .zip";
+function selectFiles(fs: FileList) {
+  const arr = Array.from(fs);
+  const naoZip = arr.filter((f) => !f.name.toLowerCase().endsWith(".zip"));
+  if (naoZip.length > 0) {
+    errorMsg.value =
+      `Só aceita arquivos .zip. Inválidos: ` +
+      naoZip.map((f) => f.name).join(", ");
     return;
   }
   errorMsg.value = null;
-  file.value = f;
-  // Tenta inferir período pelo nome (ex: SOLUCOES_2025-08.zip)
-  const m = f.name.match(/(\d{4})[-_](\d{2})/);
+  // ACUMULA: nao sobrescreve. Se ja tinha arquivos, adiciona os novos
+  // ignorando duplicados (mesmo nome + tamanho).
+  const existentes = new Set(files.value.map((f) => `${f.name}:${f.size}`));
+  const novos = arr.filter((f) => !existentes.has(`${f.name}:${f.size}`));
+  const ignorados = arr.length - novos.length;
+  files.value = [...files.value, ...novos];
+  if (ignorados > 0) {
+    errorMsg.value = `${ignorados} arquivo(s) ignorado(s) (já estavam na lista).`;
+  }
+  currentIdx.value = 0;
+  // Tenta inferir período pelo nome do primeiro arquivo (ex: SOLUCOES_2025-08.zip)
+  const primeiro = files.value[0];
+  const m = primeiro ? primeiro.name.match(/(\d{4})[-_](\d{2})/) : null;
   if (m) {
     const y = m[1];
     const mo = m[2];
@@ -77,15 +115,18 @@ function selectFile(f: File) {
   }
 }
 
-async function startUpload() {
-  if (!file.value) return;
+function removerArquivo(idx: number) {
+  files.value = files.value.filter((_, i) => i !== idx);
+  if (currentIdx.value >= files.value.length) currentIdx.value = 0;
+}
+
+async function uploadUm(f: File): Promise<void> {
   phase.value = "uploading";
   progress.value = null;
   peakRate.value = 0;
-  errorMsg.value = null;
 
   const h = uploadZip({
-    file: file.value,
+    file: f,
     empresaId: props.empresaId,
     dtIni: dtIni.value,
     dtFim: dtFim.value,
@@ -104,45 +145,83 @@ async function startUpload() {
     handle.value = null;
 
     if (res.duplicado) {
-      // já existia — só busca o zip e emite
       const det = await detalheZip(res.zip_id);
-      phase.value = "ok";
       emit("uploaded", det.zip);
+      resultados.value.push({
+        nome: f.name,
+        ok: true,
+        zip_id: res.zip_id,
+        duplicado: true,
+      });
       return;
     }
 
-    // upload OK → backend ainda não extraiu (chama /extrair)
     phase.value = "extraindo";
-    await pollExtracao(res.zip_id);
+    const r = await fetch(`/api/explorador/zips/${res.zip_id}/extrair`, {
+      method: "POST",
+    });
+    if (!r.ok) {
+      const txt = await r.text().catch(() => "");
+      throw new Error(`extração: HTTP ${r.status} ${txt.slice(0, 200)}`);
+    }
+    const det = await detalheZip(res.zip_id);
+    emit("uploaded", det.zip);
+    resultados.value.push({ nome: f.name, ok: true, zip_id: res.zip_id });
   } catch (e) {
     handle.value = null;
     if ((e as DOMException)?.name === "AbortError") {
-      phase.value = "idle";
-      return;
+      resultados.value.push({ nome: f.name, ok: false, erro: "cancelado" });
+      throw e;
     }
-    phase.value = "erro";
-    errorMsg.value = (e as Error).message || "falha no upload";
+    resultados.value.push({
+      nome: f.name,
+      ok: false,
+      erro: (e as Error).message || "falha",
+    });
+    // NAO relanca: queremos continuar pros proximos arquivos
   }
 }
 
-async function pollExtracao(zipId: number) {
-  // Dispara extração e aguarda concluir
-  try {
-    const r = await fetch(`/api/explorador/zips/${zipId}/extrair`, {
-      method: "POST",
-    });
-    if (!r.ok) throw new Error(`extração: HTTP ${r.status}`);
-    // Quando o POST volta, já está extraído (síncrono)
-    const det = await detalheZip(zipId);
+async function startUpload() {
+  if (files.value.length === 0) return;
+  errorMsg.value = null;
+  resultados.value = [];
+  cancelLoop = false;
+
+  for (let i = 0; i < files.value.length; i++) {
+    if (cancelLoop) break;
+    const f = files.value[i];
+    if (!f) continue;
+    currentIdx.value = i;
+    try {
+      await uploadUm(f);
+    } catch (e) {
+      if ((e as DOMException)?.name === "AbortError") {
+        // cancelado pelo usuario: para o loop
+        phase.value = "idle";
+        return;
+      }
+      // outros erros: ja foram registrados em resultados, segue pro proximo
+    }
+  }
+
+  // Resumo final
+  const okN = resultados.value.filter((r) => r.ok).length;
+  const falhaN = resultados.value.filter((r) => !r.ok).length;
+  if (falhaN === 0) {
     phase.value = "ok";
-    emit("uploaded", det.zip);
-  } catch (e) {
+  } else if (okN === 0) {
     phase.value = "erro";
-    errorMsg.value = (e as Error).message;
+    errorMsg.value =
+      `Todos os ${falhaN} arquivos falharam:\n` +
+      resultados.value.map((r) => `• ${r.nome}: ${r.erro}`).join("\n");
+  } else {
+    phase.value = "ok";
   }
 }
 
 function cancel() {
+  cancelLoop = true;
   handle.value?.abort();
   handle.value = null;
   phase.value = "idle";
@@ -150,7 +229,9 @@ function cancel() {
 }
 
 function reset() {
-  file.value = null;
+  files.value = [];
+  currentIdx.value = 0;
+  resultados.value = [];
   phase.value = "idle";
   progress.value = null;
   errorMsg.value = null;
@@ -176,15 +257,18 @@ const sentLabel = computed(() =>
     ? `${formatBytes(progress.value.loaded)} / ${formatBytes(progress.value.total)}`
     : "",
 );
+const totalBytesSelecionados = computed(() =>
+  files.value.reduce((acc, f) => acc + f.size, 0),
+);
 </script>
 
 <template>
   <div class="uploader liquid-glass">
-    <!-- ESTADO 1: idle / arquivo selecionado -->
+    <!-- ESTADO 1: idle / arquivos selecionados -->
     <template v-if="phase === 'idle' || phase === 'erro'">
       <div
         class="dropzone"
-        :class="{ over: dragOver, hasFile: !!file }"
+        :class="{ over: dragOver, hasFile: files.length > 0 }"
         @dragover.prevent="dragOver = true"
         @dragleave="dragOver = false"
         @drop="onDrop"
@@ -194,31 +278,69 @@ const sentLabel = computed(() =>
           ref="fileInput"
           type="file"
           :accept="acceptZip"
+          multiple
           class="file-input"
           @change="onFileChange"
         />
 
-        <div v-if="!file" class="dz-empty">
+        <div v-if="files.length === 0" class="dz-empty">
           <div class="dz-icon">⬆</div>
           <div class="dz-title gg-glow">
-            Arraste um arquivo .zip do eSocial aqui
+            Arraste um ou mais .zip do eSocial aqui
           </div>
           <div class="dz-sub">
             ou <span class="link">clique para selecionar</span>
+            <br />
+            <small
+              >Pode subir vários ZIPs do mesmo mês — todos vão para o mesmo
+              período. Chain walk consolidado automático.</small
+            >
           </div>
         </div>
 
-        <div v-else class="dz-file">
-          <div class="dz-icon ok">📦</div>
-          <div class="dz-file-info">
-            <div class="dz-file-name">{{ file.name }}</div>
-            <div class="dz-file-meta">{{ formatBytes(file.size) }}</div>
+        <div v-else class="dz-files-list" @click.stop>
+          <div class="dz-files-head">
+            <div class="dz-icon ok">📦</div>
+            <div class="dz-files-title">
+              {{ files.length }} arquivo{{ files.length === 1 ? "" : "s" }}
+              selecionado{{ files.length === 1 ? "" : "s" }}
+              <span class="dz-files-bytes mono"
+                >· {{ formatBytes(totalBytesSelecionados) }}</span
+              >
+            </div>
+            <button class="btn-primary btn-sm" @click.stop="pickFile">
+              + Adicionar mais
+            </button>
+            <button class="btn-ghost btn-sm" @click.stop="reset">
+              limpar
+            </button>
           </div>
-          <button class="btn-ghost" @click.stop="reset">trocar</button>
+          <ul class="dz-files-ul">
+            <li
+              v-for="(f, i) in files"
+              :key="`${f.name}-${f.size}-${i}`"
+              class="dz-file-row"
+            >
+              <span class="dz-file-name">{{ f.name }}</span>
+              <span class="dz-file-meta mono">{{ formatBytes(f.size) }}</span>
+              <button
+                class="btn-ghost btn-xs"
+                @click.stop="removerArquivo(i)"
+                title="Remover este arquivo da lista"
+              >
+                ✕
+              </button>
+            </li>
+          </ul>
+          <div class="dz-hint">
+            💡 Pode clicar em <strong>+ Adicionar mais</strong>, arrastar outros
+            ZIPs aqui, ou segurar <kbd>Ctrl</kbd> ao selecionar pra pegar
+            vários de uma vez.
+          </div>
         </div>
       </div>
 
-      <div v-if="file" class="period-row">
+      <div v-if="files.length > 0" class="period-row">
         <label>
           <span>Início</span>
           <input v-model="dtIni" type="date" />
@@ -229,11 +351,18 @@ const sentLabel = computed(() =>
         </label>
       </div>
 
+      <div v-if="files.length > 0" class="period-hint">
+        ℹ Todos os {{ files.length }} arquivos vão para o mesmo período
+        <strong>{{ dtIni }} → {{ dtFim }}</strong
+        >. Os ZIPs aparecem agrupados em 1 card de mês na listagem.
+      </div>
+
       <div v-if="errorMsg" class="error">⚠ {{ errorMsg }}</div>
 
-      <div v-if="file" class="actions">
+      <div v-if="files.length > 0" class="actions">
         <button class="btn-primary" @click="startUpload">
           ▶ Iniciar upload
+          <span v-if="files.length > 1">({{ files.length }} arquivos)</span>
         </button>
       </div>
     </template>
@@ -248,6 +377,10 @@ const sentLabel = computed(() =>
           :size="260"
         />
         <div class="up-stats">
+          <div v-if="progressoLote" class="up-row hot">
+            <div class="lbl">Lote</div>
+            <div class="val mono accent">{{ progressoLote }}</div>
+          </div>
           <div class="up-row">
             <div class="lbl">Arquivo</div>
             <div class="val mono">{{ file?.name }}</div>
@@ -269,7 +402,9 @@ const sentLabel = computed(() =>
             <div class="val mono">{{ etaLabel }}</div>
           </div>
           <div class="up-actions">
-            <button class="btn-ghost danger" @click="cancel">cancelar</button>
+            <button class="btn-ghost danger" @click="cancel">
+              cancelar lote
+            </button>
           </div>
         </div>
       </div>
@@ -279,10 +414,11 @@ const sentLabel = computed(() =>
     <template v-else-if="phase === 'finalizing'">
       <div class="extract-stage">
         <div class="spinner"></div>
+        <div v-if="progressoLote" class="ex-lote">{{ progressoLote }}</div>
         <div class="ex-title gg-glow">Finalizando upload no servidor…</div>
         <div class="ex-sub">
-          Bytes recebidos. Calculando SHA-256 e gravando no banco — isso pode
-          levar até 1 minuto para arquivos grandes.
+          <strong>{{ file?.name }}</strong> — Bytes recebidos. Calculando
+          SHA-256 e gravando no banco.
         </div>
       </div>
     </template>
@@ -291,22 +427,45 @@ const sentLabel = computed(() =>
     <template v-else-if="phase === 'extraindo'">
       <div class="extract-stage">
         <div class="spinner"></div>
+        <div v-if="progressoLote" class="ex-lote">{{ progressoLote }}</div>
         <div class="ex-title gg-glow">Extraindo XMLs do zip…</div>
         <div class="ex-sub">
-          Indexando eventos eSocial — isso pode levar alguns minutos.
+          <strong>{{ file?.name }}</strong> — Indexando eventos eSocial.
         </div>
       </div>
     </template>
 
-    <!-- ESTADO 4: ok -->
+    <!-- ESTADO 4: ok (todos ou parcialmente concluido) -->
     <template v-else-if="phase === 'ok'">
       <div class="done-stage">
         <div class="done-icon">✓</div>
-        <div class="done-title gg-glow">Upload concluído</div>
-        <div class="done-sub">
-          O zip foi indexado e está pronto para visualizar.
+        <div class="done-title gg-glow">
+          {{
+            resultados.filter((r) => !r.ok).length > 0
+              ? "Upload parcial"
+              : "Upload concluído"
+          }}
         </div>
-        <button class="btn-primary" @click="reset">+ Subir outro</button>
+        <div class="done-sub">
+          {{ resultados.filter((r) => r.ok).length }} de
+          {{ resultados.length }} arquivo(s) processado(s) com sucesso.
+          <span v-if="resultados.some((r) => r.duplicado)">
+            (alguns já existiam — duplicados detectados)
+          </span>
+        </div>
+        <ul v-if="resultados.length > 1" class="resultados-ul">
+          <li
+            v-for="(r, i) in resultados"
+            :key="i"
+            :class="{ ok: r.ok, err: !r.ok }"
+          >
+            <span class="r-icon">{{ r.ok ? "✓" : "✕" }}</span>
+            <span class="r-nome mono">{{ r.nome }}</span>
+            <span v-if="r.duplicado" class="r-tag">duplicado</span>
+            <span v-if="!r.ok" class="r-erro">{{ r.erro }}</span>
+          </li>
+        </ul>
+        <button class="btn-primary" @click="reset">+ Subir outro(s)</button>
       </div>
     </template>
   </div>
@@ -575,5 +734,156 @@ const sentLabel = computed(() =>
   color: rgba(240, 209, 229, 0.7);
   margin: 6px 0 18px;
   font-size: 0.9rem;
+}
+
+/* Lista de arquivos selecionados (multi-upload) */
+.dz-files-list {
+  text-align: left;
+}
+.dz-files-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.dz-files-head .dz-icon {
+  font-size: 1.8rem;
+}
+.dz-files-title {
+  flex: 1;
+  color: #fff;
+  font-weight: 600;
+}
+.dz-files-bytes {
+  color: rgba(240, 209, 229, 0.65);
+  font-weight: 400;
+  font-size: 0.85rem;
+  margin-left: 6px;
+}
+.dz-files-ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  border-top: 1px solid rgba(240, 209, 229, 0.1);
+}
+.dz-file-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px;
+  border-bottom: 1px solid rgba(240, 209, 229, 0.06);
+  font-size: 0.85rem;
+}
+.dz-file-row .dz-file-name {
+  flex: 1;
+  color: #fff;
+  word-break: break-all;
+}
+.dz-file-row .dz-file-meta {
+  color: rgba(240, 209, 229, 0.6);
+  font-size: 0.78rem;
+}
+.btn-xs {
+  padding: 2px 8px;
+  font-size: 0.75rem;
+}
+.btn-sm {
+  padding: 4px 12px;
+  font-size: 0.8rem;
+}
+
+.dz-hint {
+  margin-top: 10px;
+  padding: 8px 12px;
+  font-size: 0.8rem;
+  color: rgba(240, 209, 229, 0.7);
+  background: rgba(61, 242, 75, 0.04);
+  border-left: 3px solid rgba(61, 242, 75, 0.45);
+  border-radius: 4px;
+}
+.dz-hint strong {
+  color: #3df24b;
+}
+.dz-hint kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+  color: #fff;
+}
+
+.period-hint {
+  margin-top: 10px;
+  padding: 8px 12px;
+  background: rgba(61, 242, 75, 0.05);
+  border: 1px solid rgba(61, 242, 75, 0.18);
+  border-radius: 8px;
+  font-size: 0.85rem;
+  color: rgba(240, 209, 229, 0.85);
+}
+.period-hint strong {
+  color: #3df24b;
+}
+
+.up-row.hot .val {
+  color: #3df24b;
+  font-weight: 700;
+}
+
+.ex-lote {
+  display: inline-block;
+  margin-bottom: 8px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(61, 242, 75, 0.12);
+  border: 1px solid rgba(61, 242, 75, 0.35);
+  color: #3df24b;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.resultados-ul {
+  list-style: none;
+  padding: 0;
+  margin: 14px 0 18px;
+  text-align: left;
+  max-height: 200px;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+}
+.resultados-ul li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: 0.85rem;
+  border-bottom: 1px solid rgba(240, 209, 229, 0.06);
+}
+.resultados-ul li.ok .r-icon {
+  color: #3df24b;
+}
+.resultados-ul li.err .r-icon {
+  color: #f55;
+}
+.resultados-ul .r-nome {
+  flex: 1;
+  word-break: break-all;
+}
+.resultados-ul .r-tag {
+  font-size: 0.7rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(240, 209, 229, 0.15);
+  color: rgba(240, 209, 229, 0.8);
+}
+.resultados-ul .r-erro {
+  font-size: 0.75rem;
+  color: #f88;
 }
 </style>

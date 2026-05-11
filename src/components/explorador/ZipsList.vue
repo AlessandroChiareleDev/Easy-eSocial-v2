@@ -328,6 +328,135 @@ const zipsOrdenados = computed(() =>
   [...props.zips].sort((a, b) => b.enviado_em.localeCompare(a.enviado_em)),
 );
 
+// Agrupa zips por ano-mes (dt_ini) — 1 "card de mes" com N arquivos dentro
+interface GrupoMes {
+  chave: string; // YYYY-MM
+  label: string; // ago/2025
+  zips: ZipRow[];
+  totalBytes: number;
+  totalXmls: number;
+  statusAgregado: "ok" | "pendente" | "extraindo" | "erro" | "mixed";
+  pendentes: number;
+  erros: number;
+  oks: number;
+}
+
+const MESES_PT = [
+  "jan",
+  "fev",
+  "mar",
+  "abr",
+  "mai",
+  "jun",
+  "jul",
+  "ago",
+  "set",
+  "out",
+  "nov",
+  "dez",
+];
+
+function labelMes(ym: string): string {
+  const [y, m] = ym.split("-");
+  const mi = Number(m) - 1;
+  if (mi < 0 || mi > 11 || !y) return ym;
+  return `${MESES_PT[mi]}/${y}`;
+}
+
+const gruposPorMes = computed<GrupoMes[]>(() => {
+  const mapa = new Map<string, GrupoMes>();
+  for (const z of zipsOrdenados.value) {
+    const k = (z.dt_ini || "").slice(0, 7) || "sem-data";
+    let g = mapa.get(k);
+    if (!g) {
+      g = {
+        chave: k,
+        label: labelMes(k),
+        zips: [],
+        totalBytes: 0,
+        totalXmls: 0,
+        statusAgregado: "ok",
+        pendentes: 0,
+        erros: 0,
+        oks: 0,
+      };
+      mapa.set(k, g);
+    }
+    g.zips.push(z);
+    g.totalBytes += z.tamanho_bytes || 0;
+    g.totalXmls += z.total_xmls || 0;
+    if (z.extracao_status === "ok") g.oks++;
+    else if (z.extracao_status === "erro") g.erros++;
+    else g.pendentes++;
+  }
+  // status agregado
+  for (const g of mapa.values()) {
+    if (g.erros > 0 && g.oks === 0 && g.pendentes === 0)
+      g.statusAgregado = "erro";
+    else if (g.erros === 0 && g.pendentes === 0) g.statusAgregado = "ok";
+    else if (g.erros > 0 || (g.pendentes > 0 && g.oks > 0))
+      g.statusAgregado = "mixed";
+    else g.statusAgregado = "pendente";
+  }
+  return [...mapa.values()].sort((a, b) => b.chave.localeCompare(a.chave));
+});
+
+// Extrai TODOS os ZIPs pendentes/erro de um mes em sequencia.
+// Chain walk roda automatico no fim de cada extracao por empresa_id,
+// entao no fim do loop o mes inteiro esta com chain walk unificado.
+async function disparaExtracaoLote(g: GrupoMes) {
+  const alvos = g.zips.filter(
+    (z) =>
+      z.extracao_status === "pendente" || z.extracao_status === "erro",
+  );
+  if (alvos.length === 0) {
+    window.alert("Nenhum ZIP pendente/erro neste mês. Tudo já indexado.");
+    return;
+  }
+  const ok = window.confirm(
+    `Extrair ${alvos.length} ZIP(s) do mês ${g.label}?\n\n` +
+      alvos.map((z) => `• ${z.nome_arquivo_original}`).join("\n") +
+      `\n\nVai rodar em sequência. XMLs duplicados entre os ZIPs ` +
+      `são detectados e ignorados automaticamente (via id_evento).\n` +
+      `Chain walk roda automaticamente no fim, unificando os arquivos.`,
+  );
+  if (!ok) return;
+  let okN = 0;
+  let falhaN = 0;
+  const falhas: string[] = [];
+  for (const z of alvos) {
+    extraindo.value.add(z.id);
+    extraindo.value = new Set(extraindo.value);
+    try {
+      await extrairZip(z.id, { empresaId: props.empresaId });
+      okN++;
+    } catch (e) {
+      falhaN++;
+      falhas.push(`${z.nome_arquivo_original}: ${(e as Error).message}`);
+      extracaoErro.value.set(z.id, (e as Error).message);
+      extracaoErro.value = new Map(extracaoErro.value);
+    } finally {
+      extraindo.value.delete(z.id);
+      extraindo.value = new Set(extraindo.value);
+    }
+  }
+  emit("refresh");
+  if (falhaN === 0) {
+    window.alert(
+      `✅ EXTRAÇÃO DO MÊS ${g.label} OK\n\n` +
+        `${okN} ZIP(s) processados.\n` +
+        `Chain walk consolidado.\n\n` +
+        `Agora pode ir no S-1210 Anual.`,
+    );
+  } else {
+    window.alert(
+      `⚠ EXTRAÇÃO DO MÊS ${g.label} PARCIAL\n\n` +
+        `${okN} OK, ${falhaN} falhou.\n\n` +
+        falhas.join("\n"),
+    );
+  }
+}
+
 const okZipsCount = computed(
   () => props.zips.filter((z) => z.extracao_status === "ok").length,
 );
@@ -384,30 +513,72 @@ const selecaoCount = computed(() => selecionados.value.size);
       </div>
     </div>
 
-    <div class="grid">
-      <div
-        v-for="z in zipsOrdenados"
-        :key="z.id"
-        class="zip-card liquid-glass"
-        :class="{ 'is-selected': selecionados.has(z.id) }"
+    <div class="meses">
+      <section
+        v-for="g in gruposPorMes"
+        :key="g.chave"
+        class="mes-grupo liquid-glass"
       >
-        <div class="zc-head">
-          <label
-            v-if="z.extracao_status === 'ok'"
-            class="zc-check"
-            :title="'Selecionar para batch S-5002'"
+        <header class="mes-head">
+          <div class="mes-info">
+            <div class="mes-label gg-glow">📅 {{ g.label }}</div>
+            <div class="mes-sub">
+              {{ g.zips.length }} arquivo{{ g.zips.length === 1 ? "" : "s" }} ·
+              <span class="mono">{{ formatBytes(g.totalBytes) }}</span>
+              <span v-if="g.totalXmls > 0">
+                ·
+                <span class="mono accent">{{ g.totalXmls }}</span>
+                XMLs indexados
+              </span>
+            </div>
+            <div class="mes-status">
+              <span v-if="g.oks > 0" class="badge ok">{{ g.oks }} ok</span>
+              <span v-if="g.pendentes > 0" class="badge warn">
+                {{ g.pendentes }} pendente{{ g.pendentes === 1 ? "" : "s" }}
+              </span>
+              <span v-if="g.erros > 0" class="badge err">
+                {{ g.erros }} erro{{ g.erros === 1 ? "" : "s" }}
+              </span>
+            </div>
+          </div>
+          <div class="mes-actions">
+            <button
+              v-if="g.pendentes > 0 || g.erros > 0"
+              class="btn-primary"
+              :disabled="g.zips.some((z) => extraindo.has(z.id))"
+              @click="disparaExtracaoLote(g)"
+              :title="'Extrai todos os ZIPs pendentes/erro deste mês em sequência. Chain walk consolidado no fim.'"
+            >
+              ⚡ Extrair tudo deste mês
+              ({{ g.pendentes + g.erros }})
+            </button>
+          </div>
+        </header>
+
+        <div class="grid">
+          <div
+            v-for="z in g.zips"
+            :key="z.id"
+            class="zip-card liquid-glass"
+            :class="{ 'is-selected': selecionados.has(z.id) }"
           >
-            <input
-              type="checkbox"
-              :checked="selecionados.has(z.id)"
-              :disabled="batchRodando"
-              @change="toggleSelecionado(z.id)"
-            />
-          </label>
-          <div class="zc-period gg-glow">{{ fmtPeriodo(z) }}</div>
-          <span class="badge" :class="statusLabel(z.extracao_status).cls">
-            {{ statusLabel(z.extracao_status).label }}
-          </span>
+            <div class="zc-head">
+              <label
+                v-if="z.extracao_status === 'ok'"
+                class="zc-check"
+                :title="'Selecionar para batch S-5002'"
+              >
+                <input
+                  type="checkbox"
+                  :checked="selecionados.has(z.id)"
+                  :disabled="batchRodando"
+                  @change="toggleSelecionado(z.id)"
+                />
+              </label>
+              <div class="zc-period gg-glow">{{ fmtPeriodo(z) }}</div>
+              <span class="badge" :class="statusLabel(z.extracao_status).cls">
+                {{ statusLabel(z.extracao_status).label }}
+              </span>
         </div>
 
         <div class="zc-name" :title="z.nome_arquivo_original">
@@ -507,6 +678,8 @@ const selecaoCount = computed(() => selecionados.value.size);
           </button>
         </div>
       </div>
+        </div>
+      </section>
     </div>
 
     <!-- Modal de progresso + análise -->
@@ -681,6 +854,65 @@ const selecaoCount = computed(() => selecionados.value.size);
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 16px;
+}
+
+/* Agrupamento por mes — cada mes vira 1 "card" com N arquivos dentro */
+.meses {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.mes-grupo {
+  border-radius: 18px;
+  padding: 18px;
+  border: 1px solid rgba(61, 242, 75, 0.18);
+  background: linear-gradient(
+    180deg,
+    rgba(61, 242, 75, 0.04),
+    rgba(0, 0, 0, 0.18)
+  );
+}
+.mes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 4px 4px 14px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid rgba(240, 209, 229, 0.08);
+  flex-wrap: wrap;
+}
+.mes-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.mes-label {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #fff;
+  text-transform: capitalize;
+  letter-spacing: 0.01em;
+}
+.mes-sub {
+  color: rgba(240, 209, 229, 0.7);
+  font-size: 0.85rem;
+}
+.mes-sub .accent {
+  color: #3df24b;
+  font-weight: 700;
+}
+.mes-status {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+.mes-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .zip-card {

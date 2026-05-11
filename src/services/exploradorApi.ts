@@ -477,6 +477,103 @@ export async function s1210CpfsDoMes(
   );
 }
 
+// ─── Detalhamento por CPF (modal) ──────────────────────────────────────
+export interface DetalhePagamento {
+  dt_pgto: string | null;
+  tp_pgto: string;
+  tp_pgto_label: string;
+  per_ref: string | null;
+  ide_dm_dev: string | null;
+  vr_liq: number | null;
+  vr_liq_raw: string | null;
+}
+export interface DetalheInfoIR {
+  tp_cr: string;
+  tp_cr_label: string;
+  vr_cr: number | null;
+  vr_cr_raw: string | null;
+}
+export interface DetalheS5002InfoIR {
+  tp_info_ir: string | null;
+  tp_info_ir_label: string;
+  valor: number | null;
+}
+export interface DetalheS5002 {
+  nr_recibo: string | null;
+  id: string | null;
+  vazio: boolean;
+  cr_men: string | null;
+  vlr_rend_trib: number | null;
+  vlr_prev_oficial: number | null;
+  vlr_ir_retido: number | null;
+  info_ir: DetalheS5002InfoIR[];
+}
+export interface DetalheEnvio {
+  status: string;
+  codigo_resposta: string | null;
+  descricao_resposta: string | null;
+  nr_recibo_usado: string | null;
+  nr_recibo_novo: string | null;
+  protocolo: string | null;
+  erro_descricao: string | null;
+  enviado_em: string | null;
+}
+export interface DetalheCpf {
+  cpf: string;
+  nome: string | null;
+  matricula: string | null;
+  lote_num: number;
+  per_apur: string;
+  zip_encontrado: boolean;
+  zip_erro: string | null;
+  ind_retif_original: string | null;
+  dh_processamento: string | null;
+  nr_recibo_zip: string | null;
+  nr_recibo_ativo: string | null;
+  recibo_fonte: string | null;
+  cadeia_candidatos: number;
+  pagamentos: DetalhePagamento[];
+  total_vr_liq: number | null;
+  info_ir: DetalheInfoIR[];
+  s5002_list: DetalheS5002[];
+  s5002_ativo: DetalheS5002 | null;
+  ir_efetivo_valor: number | null;
+  ir_efetivo_fonte: string | null;
+  status_atual: string;
+  ultimo_envio: DetalheEnvio | null;
+  historico_envios: DetalheEnvio[];
+  qtd_envios: number;
+  empregador_cnpj_raiz: string;
+  tp_amb: string;
+  proc_emi: string;
+  ver_proc: string;
+}
+
+export async function s1210DetalheCpf(
+  loteNum: number,
+  perApur: string,
+  cpf: string,
+  empresaId: number,
+) {
+  return getJson<DetalheCpf>(
+    `/api/s1210-repo/anual/detalhe-cpf/${loteNum}/${encodeURIComponent(
+      perApur,
+    )}/${cpf}?empresa_id=${empresaId}`,
+  );
+}
+
+export function urlXmlCpf(
+  loteNum: number,
+  perApur: string,
+  cpf: string,
+  empresaId: number,
+  tipo: "S-1210" | "S-5002" = "S-1210",
+): string {
+  return `/api/s1210-repo/anual/xml-cpf/${loteNum}/${encodeURIComponent(
+    perApur,
+  )}/${cpf}?empresa_id=${empresaId}&tipo=${tipo}`;
+}
+
 export async function cadeiaCpf(args: {
   empresaId: number;
   cpf: string;

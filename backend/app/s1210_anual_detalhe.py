@@ -161,9 +161,22 @@ def detalhe_cpf(
             )
             scope_row = cur.fetchone()
             if not scope_row:
-                raise HTTPException(
-                    404, f"CPF {cpf} não está no lote {lote_num} de {per_apur}"
+                # Fallback: CPF fora do scope mas pode existir no Explorador
+                # (ex.: rescisão, evento órfão, lote diferente). Retornamos
+                # mesmo assim para permitir auditoria pelo modal.
+                cur.execute(
+                    """SELECT nome FROM s1210_cpf_scope
+                        WHERE empresa_id=%s AND cpf=%s LIMIT 1""",
+                    (internal_id, cpf),
                 )
+                fallback = cur.fetchone()
+                scope_row = {
+                    "cpf": cpf,
+                    "nome": (fallback or {}).get("nome"),
+                    "matricula": None,
+                    "lote_num": lote_num,
+                    "per_apur": per_apur,
+                }
 
             # 2) Histórico de envios
             cur.execute(

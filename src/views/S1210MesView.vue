@@ -371,7 +371,13 @@ function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(r, i) in linhas" :key="r.cpf">
+            <tr
+              v-for="(r, i) in linhas"
+              :key="r.cpf"
+              class="row-click"
+              @click="abrirDetalhe(r)"
+              :title="`Ver detalhamento de ${fmtCpf(r.cpf)}`"
+            >
               <td class="muted">{{ i + 1 }}</td>
               <td class="mono">{{ fmtCpf(r.cpf) }}</td>
               <td>{{ r.nome || "—" }}</td>
@@ -410,16 +416,9 @@ function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
                         : 'XML não indexado para este CPF'
                       : 'Disponível apenas para empresa Soluções'
                   "
-                  @click="baixarXml(r.cpf)"
+                  @click.stop="baixarXml(r.cpf)"
                 >
                   ⬇ XML
-                </button>
-                <button
-                  class="btn-det"
-                  title="Ver detalhamento completo do envio"
-                  @click="abrirDetalhe(r)"
-                >
-                  🔍 Detalhar
                 </button>
               </td>
             </tr>
@@ -1076,19 +1075,12 @@ function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
 }
 
 /* ═══════ MODAL DETALHE DO CPF ═══════ */
-.btn-det {
-  margin-left: 0.35rem;
-  padding: 0.32rem 0.55rem;
-  font-size: 0.78rem;
-  border-radius: 6px;
-  border: 1px solid rgba(120, 170, 255, 0.32);
-  background: rgba(80, 130, 220, 0.12);
-  color: #cfe2ff;
+.row-click {
   cursor: pointer;
+  transition: background 0.12s ease;
 }
-.btn-det:hover {
-  background: rgba(80, 130, 220, 0.22);
-  border-color: rgba(120, 170, 255, 0.55);
+.row-click:hover {
+  background: rgba(120, 170, 255, 0.08) !important;
 }
 .modal-bg {
   position: fixed;

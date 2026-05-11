@@ -6,6 +6,7 @@ import {
   extrairZip,
   deletarZip,
   analisarS5002,
+  reuploadZip,
   type ZipRow,
   type AnaliseS5002Resp,
 } from "@/services/exploradorApi";
@@ -19,6 +20,7 @@ const emit = defineEmits<{
 const extraindo = ref<Set<number>>(new Set());
 const extracaoErro = ref<Map<number, string>>(new Map());
 const excluindo = ref<Set<number>>(new Set());
+const reuploadAndamento = ref<Map<number, number>>(new Map()); // zip_id → pct
 
 // === Multi-select para batch "Só S-5002" ===
 const selecionados = ref<Set<number>>(new Set());
@@ -173,6 +175,66 @@ async function disparaReextrairS5002(z: ZipRow) {
     extraindo.value.delete(z.id);
     extraindo.value = new Set(extraindo.value);
   }
+}
+
+async function disparaReupload(z: ZipRow) {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".zip,application/zip";
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    // Tamanho deve bater (validação cliente, server também valida)
+    let forcar = false;
+    if (z.tamanho_bytes && file.size !== z.tamanho_bytes) {
+      const ok = window.confirm(
+        `O arquivo selecionado tem ${formatBytes(file.size)}, mas o card ` +
+          `registra ${formatBytes(z.tamanho_bytes)}.\n\n` +
+          `Provavelmente é um ZIP diferente. Deseja mesmo assim sobrescrever ` +
+          `(forçar)? Os metadados (sha256, tamanho) serão atualizados.`,
+      );
+      if (!ok) return;
+      forcar = true;
+    }
+    reuploadAndamento.value.set(z.id, 0);
+    reuploadAndamento.value = new Map(reuploadAndamento.value);
+    extracaoErro.value.delete(z.id);
+    try {
+      await reuploadZip(z.id, file, forcar, (pct) => {
+        reuploadAndamento.value.set(z.id, pct);
+        reuploadAndamento.value = new Map(reuploadAndamento.value);
+      });
+      emit("refresh");
+    } catch (e) {
+      const msg = (e as Error).message;
+      // Se falhou por sha diferente, oferece forçar
+      if (!forcar && /SHA-256/i.test(msg)) {
+        const ok2 = window.confirm(
+          msg +
+            `\n\nDeseja sobrescrever mesmo assim (forçar)? O card vai apontar para o novo ZIP.`,
+        );
+        if (ok2) {
+          try {
+            await reuploadZip(z.id, file, true, (pct) => {
+              reuploadAndamento.value.set(z.id, pct);
+              reuploadAndamento.value = new Map(reuploadAndamento.value);
+            });
+            emit("refresh");
+          } catch (e2) {
+            extracaoErro.value.set(z.id, (e2 as Error).message);
+            extracaoErro.value = new Map(extracaoErro.value);
+          }
+        }
+      } else {
+        extracaoErro.value.set(z.id, msg);
+        extracaoErro.value = new Map(extracaoErro.value);
+      }
+    } finally {
+      reuploadAndamento.value.delete(z.id);
+      reuploadAndamento.value = new Map(reuploadAndamento.value);
+    }
+  };
+  input.click();
 }
 
 async function disparaExclusao(z: ZipRow) {
@@ -375,6 +437,20 @@ const selecaoCount = computed(() => selecionados.value.size);
           <a class="btn-ghost" :href="urlDownloadZip(z.id)" download>
             ⬇ Baixar zip
           </a>
+          <button
+            v-if="z.extracao_status === 'erro'"
+            class="btn-ghost btn-reupload"
+            :disabled="reuploadAndamento.has(z.id)"
+            @click="disparaReupload(z)"
+            :title="
+              'Re-envia o mesmo ZIP para recuperar o card (substitui o Large Object perdido).'
+            "
+          >
+            <template v-if="reuploadAndamento.has(z.id)">
+              📤 enviando… {{ Math.floor(reuploadAndamento.get(z.id) ?? 0) }}%
+            </template>
+            <template v-else>📤 Re-upload do ZIP</template>
+          </button>
           <button
             v-if="z.extracao_status === 'ok'"
             class="btn-ghost"

@@ -245,6 +245,130 @@ def detalhe_zip(zip_id: int):
     return {"ok": True, "zip": out}
 
 
+@router.post("/zips/{zip_id}/reupload")
+def reupload_zip(
+    zip_id: int,
+    arquivo: UploadFile = File(...),
+    forcar: bool = Form(False, description="Se True, aceita SHA-256 diferente"),
+):
+    """Substitui o Large Object do ZIP existente (recupera card com LO perdido).
+
+    Útil quando `extracao_status='erro'` com mensagem "large object N does not exist".
+    Por padrão exige SHA-256 idêntico ao registrado. Use `forcar=True` para aceitar
+    qualquer arquivo (cuidado: vai sobrescrever metadados de tamanho/sha).
+    """
+    nome_original = arquivo.filename or "reupload.zip"
+
+    # 1) lê o card existente
+    with db.cursor() as c:
+        c.execute(
+            """SELECT id, empresa_id, conteudo_oid, sha256, tamanho_bytes,
+                      nome_arquivo_original, extracao_status
+               FROM empresa_zips_brutos WHERE id=%s""",
+            (zip_id,),
+        )
+        row = c.fetchone()
+        if not row:
+            raise HTTPException(404, "zip não encontrado")
+
+    empresa_id = row["empresa_id"]
+    old_oid = int(row["conteudo_oid"]) if row["conteudo_oid"] is not None else None
+    sha_esperado = row["sha256"]
+    tam_esperado = row["tamanho_bytes"]
+
+    conn = db.connect(empresa_id)
+    new_oid = None
+    try:
+        # 2) stream do novo arquivo → novo LO
+        new_oid, total_bytes, sha256_hex = storage.write_lo_streaming(conn, arquivo.file)
+
+        if total_bytes == 0:
+            storage.unlink_lo(conn, new_oid)
+            conn.commit()
+            raise HTTPException(400, "arquivo vazio")
+        if total_bytes > config.MAX_UPLOAD_BYTES:
+            storage.unlink_lo(conn, new_oid)
+            conn.commit()
+            raise HTTPException(413, f"arquivo > {config.MAX_UPLOAD_BYTES} bytes")
+
+        # 3) validação de identidade (a menos que forcar=True)
+        if not forcar:
+            if sha_esperado and sha256_hex != sha_esperado:
+                storage.unlink_lo(conn, new_oid)
+                conn.commit()
+                raise HTTPException(
+                    400,
+                    f"SHA-256 não bate (esperado={sha_esperado[:16]}…, recebido={sha256_hex[:16]}…). "
+                    "Use forcar=true para sobrescrever mesmo assim.",
+                )
+            if tam_esperado and total_bytes != tam_esperado:
+                storage.unlink_lo(conn, new_oid)
+                conn.commit()
+                raise HTTPException(
+                    400,
+                    f"tamanho não bate (esperado={tam_esperado}, recebido={total_bytes}). "
+                    "Use forcar=true para sobrescrever.",
+                )
+
+        # 4) atualiza card: aponta para o novo LO, reseta status, atualiza meta
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE empresa_zips_brutos
+                      SET conteudo_oid = %s,
+                          sha256 = %s,
+                          tamanho_bytes = %s,
+                          extracao_status = 'pendente',
+                          extracao_erro = NULL,
+                          extraido_em = NULL
+                    WHERE id = %s""",
+                (new_oid, sha256_hex, total_bytes, zip_id),
+            )
+
+        # 5) tenta apagar o LO antigo (pode já não existir — ignora erro)
+        if old_oid and old_oid != new_oid:
+            try:
+                storage.unlink_lo(conn, old_oid)
+            except Exception:  # noqa: BLE001
+                pass
+
+        conn.commit()
+        _log_atividade(
+            empresa_id, "reupload",
+            zip_id=zip_id,
+            nome_arquivo=nome_original,
+            sha256=sha256_hex,
+            tamanho_bytes=total_bytes,
+            detalhe={
+                "oid_antigo": old_oid,
+                "oid_novo": new_oid,
+                "sha_bate": sha_esperado == sha256_hex,
+                "forcado": forcar,
+            },
+        )
+        return {
+            "ok": True,
+            "zip_id": zip_id,
+            "sha256": sha256_hex,
+            "tamanho_bytes": total_bytes,
+            "oid_antigo": old_oid,
+            "oid_novo": new_oid,
+            "sha_bate": sha_esperado == sha256_hex,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        if new_oid:
+            try:
+                storage.unlink_lo(conn, new_oid)
+                conn.commit()
+            except Exception:  # noqa: BLE001
+                pass
+        raise HTTPException(500, f"falha no reupload: {e}")
+    finally:
+        conn.close()
+
+
 @router.delete("/zips/{zip_id}")
 def deletar_zip(zip_id: int):
     """Apaga zip + eventos indexados + Large Object do conteúdo."""

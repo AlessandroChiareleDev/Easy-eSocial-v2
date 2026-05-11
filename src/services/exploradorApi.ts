@@ -299,6 +299,57 @@ export async function analisarS5002(
   return r.json() as Promise<AnaliseS5002Resp>;
 }
 
+export interface ReuploadResp {
+  ok: boolean;
+  zip_id: number;
+  sha256: string;
+  tamanho_bytes: number;
+  oid_antigo: number | null;
+  oid_novo: number;
+  sha_bate: boolean;
+}
+
+export async function reuploadZip(
+  zipId: number,
+  file: File,
+  forcar = false,
+  onProgress?: (pct: number) => void,
+): Promise<ReuploadResp> {
+  const fd = new FormData();
+  fd.append("arquivo", file);
+  fd.append("forcar", forcar ? "true" : "false");
+
+  return new Promise<ReuploadResp>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${BASE}/api/explorador/zips/${zipId}/reupload`);
+    for (const [k, v] of Object.entries(authHeaders())) {
+      xhr.setRequestHeader(k, v as string);
+    }
+    if (onProgress) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) onProgress((e.loaded / e.total) * 100);
+      };
+    }
+    xhr.onload = () => {
+      let body: unknown;
+      try {
+        body = JSON.parse(xhr.responseText);
+      } catch {
+        body = { detail: xhr.responseText };
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(body as ReuploadResp);
+      } else {
+        const msg =
+          (body as { detail?: string })?.detail || `HTTP ${xhr.status}`;
+        reject(Object.assign(new Error(msg), { status: xhr.status }));
+      }
+    };
+    xhr.onerror = () => reject(new Error("erro de rede no reupload"));
+    xhr.send(fd);
+  });
+}
+
 export async function deletarZip(zipId: number) {
   const r = await fetch(`${BASE}/api/explorador/zips/${zipId}`, {
     method: "DELETE",

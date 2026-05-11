@@ -31,6 +31,10 @@ interface FileResult {
   zip_id?: number;
   erro?: string;
   duplicado?: boolean;
+  // estatisticas vindas do /extrair
+  total_xmls?: number;
+  indexados?: number;
+  duplicados_id_evento?: number;
 }
 const resultados = ref<FileResult[]>([]);
 
@@ -164,9 +168,18 @@ async function uploadUm(f: File): Promise<void> {
       const txt = await r.text().catch(() => "");
       throw new Error(`extração: HTTP ${r.status} ${txt.slice(0, 200)}`);
     }
+    // Le estatisticas do extrair (total_xmls, indexados, duplicados_id_evento)
+    const extractStats = await r.json().catch(() => ({}));
     const det = await detalheZip(res.zip_id);
     emit("uploaded", det.zip);
-    resultados.value.push({ nome: f.name, ok: true, zip_id: res.zip_id });
+    resultados.value.push({
+      nome: f.name,
+      ok: true,
+      zip_id: res.zip_id,
+      total_xmls: extractStats?.total_xmls,
+      indexados: extractStats?.indexados,
+      duplicados_id_evento: extractStats?.duplicados_id_evento,
+    });
   } catch (e) {
     handle.value = null;
     if ((e as DOMException)?.name === "AbortError") {
@@ -260,7 +273,20 @@ const sentLabel = computed(() =>
 const totalBytesSelecionados = computed(() =>
   files.value.reduce((acc, f) => acc + f.size, 0),
 );
-</script>
+
+// Totais agregados de todos os arquivos processados (para mostrar no fim)
+const totaisAgregados = computed(() => {
+  let totalXmls = 0;
+  let indexados = 0;
+  let duplicados = 0;
+  for (const r of resultados.value) {
+    if (!r.ok) continue;
+    totalXmls += r.total_xmls ?? 0;
+    indexados += r.indexados ?? 0;
+    duplicados += r.duplicados_id_evento ?? 0;
+  }
+  return { totalXmls, indexados, duplicados };
+});</script>
 
 <template>
   <div class="uploader liquid-glass">
@@ -449,11 +475,32 @@ const totalBytesSelecionados = computed(() =>
         <div class="done-sub">
           {{ resultados.filter((r) => r.ok).length }} de
           {{ resultados.length }} arquivo(s) processado(s) com sucesso.
-          <span v-if="resultados.some((r) => r.duplicado)">
-            (alguns já existiam — duplicados detectados)
-          </span>
         </div>
-        <ul v-if="resultados.length > 1" class="resultados-ul">
+
+        <!-- Resumo agregado de duplicados detectados e resolvidos -->
+        <div v-if="totaisAgregados.totalXmls > 0" class="dedup-resumo">
+          <div class="dedup-line">
+            📦 <strong>{{ totaisAgregados.totalXmls.toLocaleString() }}</strong>
+            XMLs lidos ·
+            ✅ <strong class="ok">{{
+              totaisAgregados.indexados.toLocaleString()
+            }}</strong> indexados
+            <span v-if="totaisAgregados.duplicados > 0">
+              ·
+              ♻ <strong class="warn">{{
+                totaisAgregados.duplicados.toLocaleString()
+              }}</strong> duplicados detectados
+            </span>
+          </div>
+          <div v-if="totaisAgregados.duplicados > 0" class="dedup-info">
+            ℹ Os <strong>{{ totaisAgregados.duplicados }}</strong> XMLs
+            duplicados (mesmo evento eSocial presente em mais de um ZIP) foram
+            <strong>detectados automaticamente e ignorados</strong> — o banco
+            tem 1 linha única por evento. Nenhum dado foi duplicado.
+          </div>
+        </div>
+
+        <ul v-if="resultados.length >= 1" class="resultados-ul">
           <li
             v-for="(r, i) in resultados"
             :key="i"
@@ -461,7 +508,17 @@ const totalBytesSelecionados = computed(() =>
           >
             <span class="r-icon">{{ r.ok ? "✓" : "✕" }}</span>
             <span class="r-nome mono">{{ r.nome }}</span>
-            <span v-if="r.duplicado" class="r-tag">duplicado</span>
+            <span v-if="r.duplicado" class="r-tag">já existia</span>
+            <span
+              v-else-if="r.ok && (r.duplicados_id_evento ?? 0) > 0"
+              class="r-tag warn"
+              :title="`${r.indexados} novos / ${r.duplicados_id_evento} já estavam de outro ZIP`"
+            >
+              ♻ {{ r.duplicados_id_evento }} dup
+            </span>
+            <span v-else-if="r.ok && r.indexados !== undefined" class="r-tag ok">
+              {{ r.indexados }} XMLs
+            </span>
             <span v-if="!r.ok" class="r-erro">{{ r.erro }}</span>
           </li>
         </ul>
@@ -885,5 +942,45 @@ const totalBytesSelecionados = computed(() =>
 .resultados-ul .r-erro {
   font-size: 0.75rem;
   color: #f88;
+}
+
+/* Resumo de dedup no estado final */
+.dedup-resumo {
+  margin: 14px 0;
+  padding: 12px 14px;
+  background: rgba(61, 242, 75, 0.04);
+  border: 1px solid rgba(61, 242, 75, 0.22);
+  border-radius: 10px;
+  text-align: left;
+}
+.dedup-line {
+  font-size: 0.95rem;
+  color: rgba(240, 209, 229, 0.9);
+}
+.dedup-line .ok {
+  color: #3df24b;
+}
+.dedup-line .warn {
+  color: #ffd56a;
+}
+.dedup-info {
+  margin-top: 8px;
+  font-size: 0.82rem;
+  color: rgba(240, 209, 229, 0.75);
+  line-height: 1.4;
+}
+.dedup-info strong {
+  color: #ffd56a;
+}
+
+.resultados-ul .r-tag.warn {
+  background: rgba(255, 213, 106, 0.15);
+  color: #ffd56a;
+  border: 1px solid rgba(255, 213, 106, 0.35);
+}
+.resultados-ul .r-tag.ok {
+  background: rgba(61, 242, 75, 0.1);
+  color: #3df24b;
+  border: 1px solid rgba(61, 242, 75, 0.3);
 }
 </style>

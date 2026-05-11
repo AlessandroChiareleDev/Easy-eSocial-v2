@@ -8,7 +8,7 @@ import {
   type ZipRow,
 } from "@/services/exploradorApi";
 
-const props = defineProps<{ zips: ZipRow[] }>();
+const props = defineProps<{ zips: ZipRow[]; empresaId?: number }>();
 const emit = defineEmits<{
   (e: "visualizar", zip: ZipRow): void;
   (e: "refresh"): void;
@@ -24,7 +24,7 @@ async function disparaExtracao(z: ZipRow) {
   // força reatividade
   extraindo.value = new Set(extraindo.value);
   try {
-    await extrairZip(z.id);
+    await extrairZip(z.id, { empresaId: props.empresaId });
     emit("refresh");
   } catch (e) {
     extracaoErro.value.set(z.id, (e as Error).message);
@@ -49,7 +49,10 @@ async function disparaReextrairS5002(z: ZipRow) {
   extracaoErro.value.delete(z.id);
   extraindo.value = new Set(extraindo.value);
   try {
-    await extrairZip(z.id, { somenteS5002: true });
+    await extrairZip(z.id, {
+      somenteS5002: true,
+      empresaId: props.empresaId,
+    });
     emit("refresh");
   } catch (e) {
     extracaoErro.value.set(z.id, (e as Error).message);

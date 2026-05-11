@@ -242,9 +242,12 @@ export async function resumoZip(zipId: number) {
 
 export async function extrairZip(
   zipId: number,
-  opts?: { somenteS5002?: boolean },
+  opts?: { somenteS5002?: boolean; empresaId?: number },
 ) {
-  const qs = opts?.somenteS5002 ? "?somente_s5002=true" : "";
+  const params = new URLSearchParams();
+  if (opts?.somenteS5002) params.set("somente_s5002", "true");
+  if (opts?.empresaId !== undefined) params.set("empresa_id", String(opts.empresaId));
+  const qs = params.toString() ? `?${params.toString()}` : "";
   return postJson<ExtractOk>(`/api/explorador/zips/${zipId}/extrair${qs}`);
 }
 

@@ -104,6 +104,7 @@ function fecharVisualizacao() {
         <ZipsList
           v-else
           :zips="zips"
+          :empresa-id="empresaId"
           @visualizar="abrirVisualizacao"
           @refresh="carregar"
         />

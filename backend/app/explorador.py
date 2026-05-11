@@ -360,7 +360,7 @@ def download_zip(zip_id: int):
 # Extração
 # ---------------------------------------------------------------------------
 
-def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False) -> dict:
+def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False, empresa_id: int | None = None) -> dict:
     """Lê o zip do Large Object e popula explorador_eventos.
 
     Usa DUAS conexões:
@@ -371,10 +371,12 @@ def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False) -> dict:
       somente_s5002: se True, IGNORA totalmente eventos S-1210 (nem insere
         nem atualiza). Útil para re-extrair um ZIP de mês já enviado e
         enriquecer só o S-5002, sem risco de tocar nos S-1210.
+      empresa_id: roteia para o tenant correto (default APPA=1). ZIPs da
+        SOLUCOES (empresa_id=2) estão em outro banco.
     """
-    conn_db = db.connect()
-    conn_lo = db.connect()
-    conn_w = db.connect()  # escreve LOs por evento (sem invalidar reader)
+    conn_db = db.connect(empresa_id=empresa_id)
+    conn_lo = db.connect(empresa_id=empresa_id)
+    conn_w = db.connect(empresa_id=empresa_id)  # escreve LOs por evento (sem invalidar reader)
     try:
         # marca como extraindo
         with conn_db.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -639,14 +641,17 @@ def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False) -> dict:
 
 
 @router.post("/zips/{zip_id}/extrair")
-def extrair_zip(zip_id: int, somente_s5002: bool = False):
+def extrair_zip(zip_id: int, somente_s5002: bool = False, empresa_id: int | None = None):
     """Extração SÍNCRONA (MVP). Pode demorar para zips grandes.
 
     Query param `somente_s5002=true`: ignora completamente eventos S-1210
     (não insere nem atualiza). Útil para re-extrair um ZIP de mês já
     enviado e enriquecer apenas o S-5002 sem risco de tocar nos S-1210.
+
+    Query param `empresa_id`: roteia para o tenant correto. Sem isso,
+    cai no default (APPA) e ZIPs de outros tenants viram "não encontrado".
     """
-    res = _extrair_zip_sync(zip_id, somente_s5002=somente_s5002)
+    res = _extrair_zip_sync(zip_id, somente_s5002=somente_s5002, empresa_id=empresa_id)
     # log de atividade (best-effort)
     try:
         with db.cursor() as c:

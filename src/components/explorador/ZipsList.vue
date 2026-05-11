@@ -5,7 +5,9 @@ import {
   urlDownloadZip,
   extrairZip,
   deletarZip,
+  analisarS5002,
   type ZipRow,
+  type AnaliseS5002Resp,
 } from "@/services/exploradorApi";
 
 const props = defineProps<{ zips: ZipRow[]; empresaId?: number }>();
@@ -17,6 +19,116 @@ const emit = defineEmits<{
 const extraindo = ref<Set<number>>(new Set());
 const extracaoErro = ref<Map<number, string>>(new Map());
 const excluindo = ref<Set<number>>(new Set());
+
+// === Multi-select para batch "Só S-5002" ===
+const selecionados = ref<Set<number>>(new Set());
+function toggleSelecionado(id: number) {
+  if (selecionados.value.has(id)) selecionados.value.delete(id);
+  else selecionados.value.add(id);
+  selecionados.value = new Set(selecionados.value);
+}
+function limparSelecao() {
+  selecionados.value = new Set();
+}
+function selecionarTodosOk() {
+  const novos = new Set(selecionados.value);
+  for (const z of props.zips) {
+    if (z.extracao_status === "ok") novos.add(z.id);
+  }
+  selecionados.value = novos;
+}
+
+// === Batch "Só S-5002" + análise ===
+const batchRodando = ref(false);
+const batchProgresso = ref<{ feitos: number; total: number; atual: string }>({
+  feitos: 0,
+  total: 0,
+  atual: "",
+});
+const batchErros = ref<{ zip_id: number; nome: string; erro: string }[]>([]);
+const analiseResultado = ref<AnaliseS5002Resp | null>(null);
+const analiseErro = ref<string | null>(null);
+const mostrarModal = ref(false);
+
+async function rodarBatchS5002() {
+  if (batchRodando.value) return;
+  const ids = [...selecionados.value];
+  if (ids.length === 0) return;
+  const zipsAlvo = props.zips.filter((z) => ids.includes(z.id));
+  const ok = window.confirm(
+    `Re-extrair APENAS S-5002 de ${zipsAlvo.length} zip(s)?\n\n` +
+      zipsAlvo
+        .map(
+          (z) =>
+            `• ${z.nome_arquivo_original}  (${z.perapur_dominante ?? z.dt_ini.slice(0, 7)})`,
+        )
+        .join("\n") +
+      `\n\nOs eventos S-1210 NÃO serão tocados. Após a re-extração, ` +
+      `vou rodar a análise de cobertura de S-5002 por CPF.`,
+  );
+  if (!ok) return;
+
+  batchRodando.value = true;
+  batchErros.value = [];
+  analiseResultado.value = null;
+  analiseErro.value = null;
+  mostrarModal.value = true;
+  batchProgresso.value = { feitos: 0, total: zipsAlvo.length, atual: "" };
+
+  // sequencial — extração é cara, evita estourar pool/conexões
+  for (const z of zipsAlvo) {
+    batchProgresso.value = {
+      feitos: batchProgresso.value.feitos,
+      total: zipsAlvo.length,
+      atual: z.nome_arquivo_original,
+    };
+    try {
+      await extrairZip(z.id, {
+        somenteS5002: true,
+        empresaId: props.empresaId,
+      });
+    } catch (e) {
+      batchErros.value.push({
+        zip_id: z.id,
+        nome: z.nome_arquivo_original,
+        erro: (e as Error).message,
+      });
+    }
+    batchProgresso.value = {
+      feitos: batchProgresso.value.feitos + 1,
+      total: zipsAlvo.length,
+      atual: z.nome_arquivo_original,
+    };
+  }
+
+  // análise (sempre tenta, mesmo se alguns falharam)
+  if (props.empresaId !== undefined) {
+    try {
+      const r = await analisarS5002(props.empresaId, ids);
+      analiseResultado.value = r;
+    } catch (e) {
+      analiseErro.value = (e as Error).message;
+    }
+  } else {
+    analiseErro.value = "empresa_id ausente — não foi possível rodar análise.";
+  }
+
+  batchRodando.value = false;
+  emit("refresh");
+}
+
+function fecharModal() {
+  if (batchRodando.value) return;
+  mostrarModal.value = false;
+}
+
+function copiarCpfs(lista: string[]) {
+  try {
+    navigator.clipboard.writeText(lista.join("\n"));
+  } catch {
+    // silencioso
+  }
+}
 
 async function disparaExtracao(z: ZipRow) {
   extraindo.value.add(z.id);
@@ -114,6 +226,11 @@ function statusLabel(s: string) {
 const zipsOrdenados = computed(() =>
   [...props.zips].sort((a, b) => b.enviado_em.localeCompare(a.enviado_em)),
 );
+
+const okZipsCount = computed(
+  () => props.zips.filter((z) => z.extracao_status === "ok").length,
+);
+const selecaoCount = computed(() => selecionados.value.size);
 </script>
 
 <template>
@@ -123,101 +240,306 @@ const zipsOrdenados = computed(() =>
     <div class="empty-sub">Suba o primeiro arquivo acima para começar.</div>
   </div>
 
-  <div v-else class="grid">
-    <div v-for="z in zipsOrdenados" :key="z.id" class="zip-card liquid-glass">
-      <div class="zc-head">
-        <div class="zc-period gg-glow">{{ fmtPeriodo(z) }}</div>
-        <span class="badge" :class="statusLabel(z.extracao_status).cls">
-          {{ statusLabel(z.extracao_status).label }}
+  <template v-else>
+    <!-- Barra de ação batch S-5002 -->
+    <div v-if="okZipsCount > 0" class="batch-bar liquid-glass">
+      <div class="bb-left">
+        <span class="bb-title">🔄 Batch S-5002</span>
+        <span class="bb-sub">
+          Selecione 1+ zips indexados para enriquecer S-5002 e rodar análise
+          de cobertura por CPF.
         </span>
       </div>
-
-      <div class="zc-name" :title="z.nome_arquivo_original">
-        {{ z.nome_arquivo_original }}
-      </div>
-
-      <div class="zc-meta">
-        <div>
-          <span class="lbl">Tamanho</span>
-          <span class="val mono">{{ formatBytes(z.tamanho_bytes) }}</span>
-        </div>
-        <div>
-          <span class="lbl">XMLs</span>
-          <span class="val mono accent">{{ z.total_xmls ?? "—" }}</span>
-        </div>
-        <div>
-          <span class="lbl">PerApur</span>
-          <span class="val mono">{{ z.perapur_dominante ?? "—" }}</span>
-        </div>
-        <div>
-          <span class="lbl">Enviado</span>
-          <span class="val mono">{{ fmtData(z.enviado_em) }}</span>
-        </div>
-      </div>
-
-      <div
-        v-if="z.extracao_status === 'erro' && z.extracao_erro"
-        class="err-msg"
-      >
-        ⚠ {{ z.extracao_erro }}
-      </div>
-      <div v-if="extracaoErro.get(z.id)" class="err-msg">
-        ⚠ {{ extracaoErro.get(z.id) }}
-      </div>
-
-      <div class="zc-actions">
+      <div class="bb-right">
+        <span class="bb-count">
+          {{ selecaoCount }} selecionado{{ selecaoCount === 1 ? "" : "s" }}
+        </span>
         <button
-          v-if="
-            z.extracao_status === 'pendente' || z.extracao_status === 'erro'
-          "
-          class="btn-primary"
-          :disabled="extraindo.has(z.id)"
-          @click="disparaExtracao(z)"
+          class="btn-ghost btn-sm"
+          :disabled="batchRodando || okZipsCount === 0"
+          @click="selecionarTodosOk"
+          title="Marca todos os zips com status 'indexado'"
+        >
+          Todos ok
+        </button>
+        <button
+          class="btn-ghost btn-sm"
+          :disabled="batchRodando || selecaoCount === 0"
+          @click="limparSelecao"
+        >
+          Limpar
+        </button>
+        <button
+          class="btn-primary btn-sm"
+          :disabled="batchRodando || selecaoCount === 0"
+          @click="rodarBatchS5002"
         >
           {{
-            extraindo.has(z.id)
-              ? "… extraindo (pode demorar)"
-              : "⚡ Extrair agora"
+            batchRodando
+              ? "… rodando"
+              : `🔄 Re-extrair S-5002 (${selecaoCount}) + analisar`
           }}
-        </button>
-        <button
-          v-else-if="z.extracao_status === 'extraindo'"
-          class="btn-primary"
-          disabled
-        >
-          … extraindo…
-        </button>
-        <button
-          v-else
-          class="btn-primary"
-          :disabled="z.extracao_status !== 'ok'"
-          @click="emit('visualizar', z)"
-        >
-          🔍 Visualizar eventos
-        </button>
-        <a class="btn-ghost" :href="urlDownloadZip(z.id)" download>
-          ⬇ Baixar zip
-        </a>
-        <button
-          v-if="z.extracao_status === 'ok'"
-          class="btn-ghost"
-          :disabled="extraindo.has(z.id)"
-          @click="disparaReextrairS5002(z)"
-          :title="'Reextrai apenas S-5002 (não toca S-1210). Útil para mês já enviado.'"
-        >
-          {{ extraindo.has(z.id) ? "… re-extraindo" : "🔄 Só S-5002" }}
-        </button>
-        <button
-          class="btn-danger"
-          :disabled="excluindo.has(z.id)"
-          @click="disparaExclusao(z)"
-          :title="'Excluir zip e eventos indexados'"
-        >
-          {{ excluindo.has(z.id) ? "… excluindo" : "🗑 Excluir" }}
         </button>
       </div>
     </div>
-  </div>
+
+    <div class="grid">
+      <div
+        v-for="z in zipsOrdenados"
+        :key="z.id"
+        class="zip-card liquid-glass"
+        :class="{ 'is-selected': selecionados.has(z.id) }"
+      >
+        <div class="zc-head">
+          <label
+            v-if="z.extracao_status === 'ok'"
+            class="zc-check"
+            :title="'Selecionar para batch S-5002'"
+          >
+            <input
+              type="checkbox"
+              :checked="selecionados.has(z.id)"
+              :disabled="batchRodando"
+              @change="toggleSelecionado(z.id)"
+            />
+          </label>
+          <div class="zc-period gg-glow">{{ fmtPeriodo(z) }}</div>
+          <span class="badge" :class="statusLabel(z.extracao_status).cls">
+            {{ statusLabel(z.extracao_status).label }}
+          </span>
+        </div>
+
+        <div class="zc-name" :title="z.nome_arquivo_original">
+          {{ z.nome_arquivo_original }}
+        </div>
+
+        <div class="zc-meta">
+          <div>
+            <span class="lbl">Tamanho</span>
+            <span class="val mono">{{ formatBytes(z.tamanho_bytes) }}</span>
+          </div>
+          <div>
+            <span class="lbl">XMLs</span>
+            <span class="val mono accent">{{ z.total_xmls ?? "—" }}</span>
+          </div>
+          <div>
+            <span class="lbl">PerApur</span>
+            <span class="val mono">{{ z.perapur_dominante ?? "—" }}</span>
+          </div>
+          <div>
+            <span class="lbl">Enviado</span>
+            <span class="val mono">{{ fmtData(z.enviado_em) }}</span>
+          </div>
+        </div>
+
+        <div
+          v-if="z.extracao_status === 'erro' && z.extracao_erro"
+          class="err-msg"
+        >
+          ⚠ {{ z.extracao_erro }}
+        </div>
+        <div v-if="extracaoErro.get(z.id)" class="err-msg">
+          ⚠ {{ extracaoErro.get(z.id) }}
+        </div>
+
+        <div class="zc-actions">
+          <button
+            v-if="
+              z.extracao_status === 'pendente' || z.extracao_status === 'erro'
+            "
+            class="btn-primary"
+            :disabled="extraindo.has(z.id)"
+            @click="disparaExtracao(z)"
+          >
+            {{
+              extraindo.has(z.id)
+                ? "… extraindo (pode demorar)"
+                : "⚡ Extrair agora"
+            }}
+          </button>
+          <button
+            v-else-if="z.extracao_status === 'extraindo'"
+            class="btn-primary"
+            disabled
+          >
+            … extraindo…
+          </button>
+          <button
+            v-else
+            class="btn-primary"
+            :disabled="z.extracao_status !== 'ok'"
+            @click="emit('visualizar', z)"
+          >
+            🔍 Visualizar eventos
+          </button>
+          <a class="btn-ghost" :href="urlDownloadZip(z.id)" download>
+            ⬇ Baixar zip
+          </a>
+          <button
+            v-if="z.extracao_status === 'ok'"
+            class="btn-ghost"
+            :disabled="extraindo.has(z.id) || batchRodando"
+            @click="disparaReextrairS5002(z)"
+            :title="
+              'Reextrai apenas S-5002 (não toca S-1210). Útil para mês já enviado.'
+            "
+          >
+            {{ extraindo.has(z.id) ? "… re-extraindo" : "🔄 Só S-5002" }}
+          </button>
+          <button
+            class="btn-danger"
+            :disabled="excluindo.has(z.id)"
+            @click="disparaExclusao(z)"
+            :title="'Excluir zip e eventos indexados'"
+          >
+            {{ excluindo.has(z.id) ? "… excluindo" : "🗑 Excluir" }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal de progresso + análise -->
+    <div v-if="mostrarModal" class="modal-overlay" @click.self="fecharModal">
+      <div class="modal liquid-glass">
+        <div class="modal-head">
+          <h3>
+            {{
+              batchRodando
+                ? "🔄 Re-extraindo S-5002…"
+                : analiseResultado
+                  ? "📊 Análise de cobertura S-5002"
+                  : "⚠ Resultado"
+            }}
+          </h3>
+          <button
+            class="btn-ghost btn-sm"
+            :disabled="batchRodando"
+            @click="fecharModal"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div class="modal-body">
+          <!-- Progresso -->
+          <div v-if="batchRodando || batchProgresso.feitos < batchProgresso.total" class="progress">
+            <div class="progress-bar">
+              <div
+                class="progress-fill"
+                :style="{
+                  width:
+                    batchProgresso.total > 0
+                      ? (batchProgresso.feitos / batchProgresso.total) * 100 + '%'
+                      : '0%',
+                }"
+              ></div>
+            </div>
+            <div class="progress-text">
+              {{ batchProgresso.feitos }} / {{ batchProgresso.total }} zips
+              <span v-if="batchProgresso.atual" class="mono">
+                · {{ batchProgresso.atual }}
+              </span>
+            </div>
+          </div>
+
+          <!-- Erros de extração -->
+          <div v-if="batchErros.length > 0" class="erros-box">
+            <strong>⚠ {{ batchErros.length }} zip(s) falharam:</strong>
+            <ul>
+              <li v-for="e in batchErros" :key="e.zip_id">
+                <span class="mono">{{ e.nome }}</span>: {{ e.erro }}
+              </li>
+            </ul>
+          </div>
+
+          <div v-if="analiseErro" class="erros-box">
+            <strong>⚠ análise falhou:</strong> {{ analiseErro }}
+          </div>
+
+          <!-- Resultado -->
+          <div v-if="analiseResultado" class="analise">
+            <div class="totais-cards">
+              <div class="tot-card">
+                <div class="tot-lbl">CPFs S-1210</div>
+                <div class="tot-val">
+                  {{ analiseResultado.totais.cpfs_s1210 }}
+                </div>
+              </div>
+              <div class="tot-card">
+                <div class="tot-lbl">CPFs S-5002</div>
+                <div class="tot-val">
+                  {{ analiseResultado.totais.cpfs_s5002 }}
+                </div>
+              </div>
+              <div class="tot-card ok">
+                <div class="tot-lbl">S-5002 enriquecidos</div>
+                <div class="tot-val">
+                  {{ analiseResultado.totais.cpfs_s5002_ricos }}
+                </div>
+              </div>
+              <div class="tot-card warn">
+                <div class="tot-lbl">S-5002 pobres</div>
+                <div class="tot-val">
+                  {{ analiseResultado.totais.cpfs_s5002_pobres }}
+                </div>
+              </div>
+              <div class="tot-card err">
+                <div class="tot-lbl">CPFs sem S-5002</div>
+                <div class="tot-val">
+                  {{ analiseResultado.totais.cpfs_faltando_s5002 }}
+                </div>
+              </div>
+            </div>
+
+            <table class="tab-perapur">
+              <thead>
+                <tr>
+                  <th>perApur</th>
+                  <th>S-1210</th>
+                  <th>S-5002</th>
+                  <th>ricos</th>
+                  <th>pobres</th>
+                  <th>faltando</th>
+                  <th>amostras</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="r in analiseResultado.por_perapur"
+                  :key="r.per_apur"
+                >
+                  <td class="mono">{{ r.per_apur }}</td>
+                  <td class="mono">{{ r.cpfs_s1210 }}</td>
+                  <td class="mono">{{ r.cpfs_s5002 }}</td>
+                  <td class="mono ok">{{ r.cpfs_s5002_ricos }}</td>
+                  <td class="mono warn">{{ r.cpfs_s5002_pobres }}</td>
+                  <td class="mono err">{{ r.cpfs_faltando_s5002 }}</td>
+                  <td class="amostras">
+                    <button
+                      v-if="r.amostra_faltando.length > 0"
+                      class="btn-ghost btn-xs"
+                      :title="r.amostra_faltando.join('\n')"
+                      @click="copiarCpfs(r.amostra_faltando)"
+                    >
+                      📋 {{ r.amostra_faltando.length }} faltando
+                    </button>
+                    <button
+                      v-if="r.amostra_pobre.length > 0"
+                      class="btn-ghost btn-xs"
+                      :title="r.amostra_pobre.join('\n')"
+                      @click="copiarCpfs(r.amostra_pobre)"
+                    >
+                      📋 {{ r.amostra_pobre.length }} pobres
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </template>
 </template>
 
 <style scoped>
@@ -413,5 +735,213 @@ const zipsOrdenados = computed(() =>
 .btn-danger:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+/* === Batch bar S-5002 === */
+.batch-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  margin-bottom: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(61, 242, 75, 0.18);
+}
+.bb-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.bb-title {
+  color: #3df24b;
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+.bb-sub {
+  color: rgba(240, 209, 229, 0.7);
+  font-size: 0.8rem;
+}
+.bb-right {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.bb-count {
+  color: rgba(240, 209, 229, 0.85);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  padding: 0 4px;
+}
+.btn-sm {
+  padding: 7px 12px;
+  font-size: 0.85rem;
+  flex: initial;
+}
+.btn-xs {
+  padding: 4px 8px;
+  font-size: 0.75rem;
+  flex: initial;
+}
+
+.zip-card.is-selected {
+  border: 1px solid rgba(61, 242, 75, 0.55);
+  box-shadow: 0 0 18px rgba(61, 242, 75, 0.18);
+}
+.zc-check {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  margin-right: 6px;
+}
+.zc-check input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #3df24b;
+  cursor: pointer;
+}
+
+/* === Modal === */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+.modal {
+  max-width: 980px;
+  width: 100%;
+  max-height: 88vh;
+  overflow-y: auto;
+  border-radius: 16px;
+  padding: 20px;
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.modal-head h3 {
+  margin: 0;
+  color: #fff;
+  font-size: 1.15rem;
+}
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.progress-bar {
+  background: rgba(255, 255, 255, 0.06);
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.progress-fill {
+  background: linear-gradient(90deg, #3df24b, #9ff7a6);
+  height: 100%;
+  transition: width 200ms ease;
+}
+.progress-text {
+  color: rgba(240, 209, 229, 0.8);
+  font-size: 0.85rem;
+}
+.progress-text .mono {
+  color: rgba(240, 209, 229, 0.6);
+}
+
+.erros-box {
+  background: rgba(255, 80, 80, 0.08);
+  border: 1px solid rgba(255, 80, 80, 0.3);
+  color: #ffb3b3;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 0.85rem;
+}
+.erros-box ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.totais-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+.tot-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(240, 209, 229, 0.15);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.tot-lbl {
+  font-size: 0.72rem;
+  color: rgba(240, 209, 229, 0.65);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.tot-val {
+  color: #fff;
+  font-size: 1.4rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+.tot-card.ok .tot-val {
+  color: #3df24b;
+}
+.tot-card.warn .tot-val {
+  color: #ffd56a;
+}
+.tot-card.err .tot-val {
+  color: #ff8a8a;
+}
+
+.tab-perapur {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+.tab-perapur th,
+.tab-perapur td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid rgba(240, 209, 229, 0.08);
+}
+.tab-perapur th {
+  color: rgba(240, 209, 229, 0.6);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+}
+.tab-perapur td {
+  color: #fff;
+}
+.tab-perapur td.ok {
+  color: #3df24b;
+}
+.tab-perapur td.warn {
+  color: #ffd56a;
+}
+.tab-perapur td.err {
+  color: #ff8a8a;
+}
+.amostras {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 </style>

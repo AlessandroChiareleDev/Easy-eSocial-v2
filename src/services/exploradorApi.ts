@@ -246,9 +246,57 @@ export async function extrairZip(
 ) {
   const params = new URLSearchParams();
   if (opts?.somenteS5002) params.set("somente_s5002", "true");
-  if (opts?.empresaId !== undefined) params.set("empresa_id", String(opts.empresaId));
+  if (opts?.empresaId !== undefined)
+    params.set("empresa_id", String(opts.empresaId));
   const qs = params.toString() ? `?${params.toString()}` : "";
   return postJson<ExtractOk>(`/api/explorador/zips/${zipId}/extrair${qs}`);
+}
+
+export interface AnaliseS5002PerApur {
+  per_apur: string;
+  cpfs_s1210: number;
+  cpfs_s5002: number;
+  cpfs_s5002_ricos: number;
+  cpfs_s5002_pobres: number;
+  cpfs_faltando_s5002: number;
+  amostra_faltando: string[];
+  amostra_pobre: string[];
+}
+
+export interface AnaliseS5002Resp {
+  ok: true;
+  zips: {
+    id: number;
+    nome_arquivo_original: string;
+    perapur_dominante: string | null;
+    total_xmls: number | null;
+  }[];
+  totais: {
+    cpfs_s1210: number;
+    cpfs_s5002: number;
+    cpfs_s5002_ricos: number;
+    cpfs_s5002_pobres: number;
+    cpfs_faltando_s5002: number;
+  };
+  por_perapur: AnaliseS5002PerApur[];
+}
+
+export async function analisarS5002(
+  empresaId: number,
+  zipIds: number[],
+): Promise<AnaliseS5002Resp> {
+  const r = await fetch(`${BASE}/api/explorador/zips/analise-s5002`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ empresa_id: empresaId, zip_ids: zipIds }),
+  });
+  if (!r.ok) {
+    const text = await r.text().catch(() => "");
+    throw Object.assign(new Error(text || `HTTP ${r.status}`), {
+      status: r.status,
+    });
+  }
+  return r.json() as Promise<AnaliseS5002Resp>;
 }
 
 export async function deletarZip(zipId: number) {

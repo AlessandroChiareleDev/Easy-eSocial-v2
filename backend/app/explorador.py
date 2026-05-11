@@ -683,6 +683,173 @@ def extrair_zip(zip_id: int, somente_s5002: bool = False, empresa_id: int | None
 
 
 # ---------------------------------------------------------------------------
+# Analise S-5002 (multi-zip)
+# ---------------------------------------------------------------------------
+
+from fastapi import Body  # noqa: E402
+
+
+@router.post("/zips/analise-s5002")
+def analise_s5002(payload: dict = Body(...)):
+    """Compara cobertura de S-5002 vs S-1210 nos ZIPs informados.
+
+    Body: { empresa_id: int, zip_ids: list[int] }
+
+    Para cada per_apur que aparece nos ZIPs, conta:
+      - cpfs_s1210:           CPFs distintos com S-1210
+      - cpfs_s5002:           CPFs distintos com S-5002 (qualquer)
+      - cpfs_s5002_ricos:     CPFs com S-5002 e dados_json contendo 'infoIR'
+        (ou seja, enriquecidos pelo extrator novo)
+      - cpfs_s5002_pobres:    CPFs com S-5002 sem 'infoIR' no dados_json
+      - cpfs_faltando_s5002:  CPFs com S-1210 mas SEM S-5002 algum
+
+    Também retorna amostras (até 50) dos faltantes/pobres p/ debug.
+    """
+    empresa_id = payload.get("empresa_id")
+    zip_ids = payload.get("zip_ids") or []
+    if not isinstance(empresa_id, int):
+        raise HTTPException(400, "empresa_id (int) obrigatório")
+    if not isinstance(zip_ids, list) or not zip_ids:
+        raise HTTPException(400, "zip_ids (list[int]) obrigatório")
+    zip_ids = [int(z) for z in zip_ids]
+
+    with db.cursor(empresa_id=empresa_id) as c:
+        # zips informados (valida tenant)
+        c.execute(
+            """
+            SELECT id, nome_arquivo_original, perapur_dominante, total_xmls
+            FROM empresa_zips_brutos
+            WHERE empresa_id=%s AND id = ANY(%s)
+            ORDER BY id
+            """,
+            (empresa_id, zip_ids),
+        )
+        zips_info = [dict(r) for r in c.fetchall()]
+        if not zips_info:
+            raise HTTPException(404, "nenhum zip encontrado nesse tenant")
+        valid_ids = [z["id"] for z in zips_info]
+
+        # agrega por per_apur — uma query só com FILTER
+        c.execute(
+            """
+            WITH base AS (
+              SELECT per_apur, tipo_evento, cpf,
+                     (dados_json ? 'infoIR') AS s5002_rico
+              FROM explorador_eventos
+              WHERE zip_id = ANY(%s)
+                AND tipo_evento IN ('S-1210','S-5002')
+                AND cpf IS NOT NULL
+                AND per_apur IS NOT NULL
+            )
+            SELECT per_apur,
+              COUNT(DISTINCT cpf) FILTER (WHERE tipo_evento='S-1210') AS cpfs_s1210,
+              COUNT(DISTINCT cpf) FILTER (WHERE tipo_evento='S-5002') AS cpfs_s5002,
+              COUNT(DISTINCT cpf) FILTER (WHERE tipo_evento='S-5002' AND s5002_rico) AS cpfs_s5002_ricos,
+              COUNT(DISTINCT cpf) FILTER (WHERE tipo_evento='S-5002' AND NOT s5002_rico) AS cpfs_s5002_pobres
+            FROM base
+            GROUP BY per_apur
+            ORDER BY per_apur
+            """,
+            (valid_ids,),
+        )
+        por_perapur_raw = [dict(r) for r in c.fetchall()]
+
+        # CPFs S-1210 sem S-5002 (faltando) por per_apur — amostra
+        c.execute(
+            """
+            WITH s1210 AS (
+              SELECT DISTINCT per_apur, cpf FROM explorador_eventos
+              WHERE zip_id = ANY(%s) AND tipo_evento='S-1210'
+                AND cpf IS NOT NULL AND per_apur IS NOT NULL
+            ),
+            s5002 AS (
+              SELECT DISTINCT per_apur, cpf FROM explorador_eventos
+              WHERE zip_id = ANY(%s) AND tipo_evento='S-5002'
+                AND cpf IS NOT NULL AND per_apur IS NOT NULL
+            ),
+            faltando AS (
+              SELECT s.per_apur, s.cpf
+              FROM s1210 s
+              LEFT JOIN s5002 t USING (per_apur, cpf)
+              WHERE t.cpf IS NULL
+            )
+            SELECT per_apur, cpf,
+                   row_number() OVER (PARTITION BY per_apur ORDER BY cpf) AS rn
+            FROM faltando
+            """,
+            (valid_ids, valid_ids),
+        )
+        falt_rows = c.fetchall()
+        amostra_faltando: dict[str, list[str]] = {}
+        totais_faltando: dict[str, int] = {}
+        for r in falt_rows:
+            per = r["per_apur"]
+            totais_faltando[per] = totais_faltando.get(per, 0) + 1
+            if r["rn"] <= 50:
+                amostra_faltando.setdefault(per, []).append(r["cpf"])
+
+        # CPFs S-5002 pobres (sem infoIR) — amostra
+        c.execute(
+            """
+            SELECT per_apur, cpf
+            FROM (
+              SELECT per_apur, cpf,
+                     row_number() OVER (PARTITION BY per_apur ORDER BY cpf) AS rn
+              FROM (
+                SELECT DISTINCT per_apur, cpf
+                FROM explorador_eventos
+                WHERE zip_id = ANY(%s)
+                  AND tipo_evento='S-5002'
+                  AND cpf IS NOT NULL AND per_apur IS NOT NULL
+                  AND NOT (dados_json ? 'infoIR')
+              ) q
+            ) qq
+            WHERE rn <= 50
+            """,
+            (valid_ids,),
+        )
+        amostra_pobre: dict[str, list[str]] = {}
+        for r in c.fetchall():
+            amostra_pobre.setdefault(r["per_apur"], []).append(r["cpf"])
+
+    # consolida
+    por_perapur = []
+    tot_s1210 = tot_s5002 = tot_ricos = tot_pobres = tot_faltando = 0
+    for r in por_perapur_raw:
+        per = r["per_apur"]
+        faltando_n = totais_faltando.get(per, 0)
+        item = {
+            "per_apur": per,
+            "cpfs_s1210": int(r["cpfs_s1210"] or 0),
+            "cpfs_s5002": int(r["cpfs_s5002"] or 0),
+            "cpfs_s5002_ricos": int(r["cpfs_s5002_ricos"] or 0),
+            "cpfs_s5002_pobres": int(r["cpfs_s5002_pobres"] or 0),
+            "cpfs_faltando_s5002": faltando_n,
+            "amostra_faltando": amostra_faltando.get(per, []),
+            "amostra_pobre": amostra_pobre.get(per, []),
+        }
+        tot_s1210 += item["cpfs_s1210"]
+        tot_s5002 += item["cpfs_s5002"]
+        tot_ricos += item["cpfs_s5002_ricos"]
+        tot_pobres += item["cpfs_s5002_pobres"]
+        tot_faltando += faltando_n
+        por_perapur.append(item)
+
+    return {
+        "ok": True,
+        "zips": zips_info,
+        "totais": {
+            "cpfs_s1210": tot_s1210,
+            "cpfs_s5002": tot_s5002,
+            "cpfs_s5002_ricos": tot_ricos,
+            "cpfs_s5002_pobres": tot_pobres,
+            "cpfs_faltando_s5002": tot_faltando,
+        },
+        "por_perapur": por_perapur,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Eventos
 # ---------------------------------------------------------------------------
 

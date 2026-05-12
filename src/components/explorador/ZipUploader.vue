@@ -261,46 +261,54 @@ async function uploadUm(f: File): Promise<void> {
     log("ok", `upload ok → zip_id=${res.zip_id}, iniciando extração`, f.name);
     phase.value = "extraindo";
     resetExtracaoProg();
-    // polling do progresso enquanto a extracao roda no backend
+
+    // Dispara extracao em background (endpoint retorna 202 imediatamente).
+    await extrairZip(res.zip_id, { empresaId: empresaIdSnapshot });
+
+    // Faz polling do progresso ate status final (ok / erro).
     let lastPctLogado = -1;
-    const pollId = window.setInterval(async () => {
-      try {
-        const p = await progressoExtracao(res.zip_id, {
-          empresaId: empresaIdSnapshot,
-        });
-        extracaoProg.value = {
-          processados: p.processados,
-          total: p.total,
-          percent: p.percent,
-          ok: p.ok,
-          duplicados: p.duplicados,
-          falhas: p.falhas,
-          etapa: p.etapa ?? "",
-        };
-        // loga marcos de 10 em 10%
-        const marco = Math.floor(p.percent / 10) * 10;
-        if (marco > lastPctLogado && p.total > 0) {
-          lastPctLogado = marco;
-          log(
-            "info",
-            `⚙ ${p.processados}/${p.total} (${p.percent}%)`,
-            f.name,
-          );
+    const extractStats = await new Promise<{
+      total_xmls: number;
+      indexados: number;
+      duplicados_id_evento: number;
+      falhas: number;
+    }>((resolve, reject) => {
+      const pollId = window.setInterval(async () => {
+        try {
+          const p = await progressoExtracao(res.zip_id, {
+            empresaId: empresaIdSnapshot,
+          });
+          extracaoProg.value = {
+            processados: p.processados,
+            total: p.total,
+            percent: p.percent,
+            ok: p.ok,
+            duplicados: p.duplicados,
+            falhas: p.falhas,
+            etapa: p.etapa ?? "",
+          };
+          const marco = Math.floor(p.percent / 10) * 10;
+          if (marco > lastPctLogado && p.total > 0) {
+            lastPctLogado = marco;
+            log("info", `⚙ ${p.processados}/${p.total} (${p.percent}%)`, f.name);
+          }
+          if (p.status === "ok") {
+            window.clearInterval(pollId);
+            resolve({
+              total_xmls: p.total || p.processados,
+              indexados: p.ok,
+              duplicados_id_evento: p.duplicados,
+              falhas: p.falhas,
+            });
+          } else if (p.status === "erro") {
+            window.clearInterval(pollId);
+            reject(new Error(p.erro || "extracao falhou"));
+          }
+        } catch {
+          // ignora erro pontual de polling — tenta de novo no proximo tick
         }
-      } catch {
-        // ignora erro de polling — o extrair em si vai retornar/falhar
-      }
-    }, 1500);
-    // Usa extrairZip do exploradorApi (injeta Authorization Bearer + X-Empresa-CNPJ).
-    // Usa o MESMO empresaId capturado no upload pra garantir consistencia de tenant.
-    let extractStats;
-    try {
-      extractStats = await extrairZip(res.zip_id, {
-        empresaId: empresaIdSnapshot,
-      });
-    } finally {
-      window.clearInterval(pollId);
-    }
+      }, 1500);
+    });
     log(
       "ok",
       `extração ok: ${extractStats.indexados}/${extractStats.total_xmls} XMLs indexados` +
@@ -610,16 +618,27 @@ const totaisAgregados = computed(() => {
         <div class="ex-sub">
           <strong>{{ file?.name }}</strong> — Indexando eventos eSocial.
         </div>
-        <div class="ex-progress" v-if="extracaoProg.total > 0 || extracaoProg.processados > 0">
+        <div
+          class="ex-progress"
+          v-if="extracaoProg.total > 0 || extracaoProg.processados > 0"
+        >
           <div class="ex-bar">
-            <div class="ex-bar-fill" :style="{ width: extracaoProg.percent + '%' }"></div>
+            <div
+              class="ex-bar-fill"
+              :style="{ width: extracaoProg.percent + '%' }"
+            ></div>
           </div>
           <div class="ex-counter mono">
-            {{ extracaoProg.processados }} / {{ extracaoProg.total || '?' }} XMLs
+            {{ extracaoProg.processados }} /
+            {{ extracaoProg.total || "?" }} XMLs
             <span v-if="extracaoProg.total">· {{ extracaoProg.percent }}%</span>
             <span v-if="extracaoProg.ok"> · {{ extracaoProg.ok }} novos</span>
-            <span v-if="extracaoProg.duplicados"> · {{ extracaoProg.duplicados }} dup</span>
-            <span v-if="extracaoProg.falhas"> · {{ extracaoProg.falhas }} falhas</span>
+            <span v-if="extracaoProg.duplicados">
+              · {{ extracaoProg.duplicados }} dup</span
+            >
+            <span v-if="extracaoProg.falhas">
+              · {{ extracaoProg.falhas }} falhas</span
+            >
           </div>
         </div>
       </div>

@@ -4,6 +4,7 @@ import {
   formatBytes,
   urlDownloadZip,
   extrairZip,
+  extrairZipEsperarFim,
   deletarZip,
   analisarS5002,
   reuploadZip,
@@ -163,7 +164,7 @@ async function disparaReextrairS5002(z: ZipRow) {
   extracaoErro.value.delete(z.id);
   extraindo.value = new Set(extraindo.value);
   try {
-    const r = await extrairZip(z.id, {
+    const r = await extrairZipEsperarFim(z.id, {
       somenteS5002: true,
       empresaId: props.empresaId,
     });

@@ -2,7 +2,11 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import tempfile
+import threading
+import time
 import zipfile
 from datetime import date, datetime
 from typing import Any, Optional
@@ -675,11 +679,50 @@ def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False, empresa_id: int 
             duplicados += (len(batch) - inserted_new)
             conn_db.commit()
 
-        # abre LO do zip na conn_lo
-        reader = storage.LargeObjectReader(conn_lo, oid, size)
-        _total_estimado = 0
+        # PERF (2026-05-12): baixa o LO inteiro pra arquivo temporario local UMA vez.
+        # Antes, zipfile.ZipFile(LargeObjectReader) fazia seek+read sobre LO
+        # remoto a CADA entry -> 143k entries * round-trip ao pooler = horas.
+        # Agora: 1 download streaming sequencial (~size/4MB chunks), depois
+        # zipfile.ZipFile(local_path) faz seeks locais em disco -> ~minutos.
+        tmp_dir = tempfile.gettempdir()
+        tmp_path = os.path.join(tmp_dir, f"esocial_zip_{zip_id}_{int(time.time())}.zip")
         try:
-            with zipfile.ZipFile(reader, mode="r") as zf:
+            with conn_db.cursor() as _cur:
+                _cur.execute(
+                    "UPDATE empresa_zips_brutos SET extracao_progresso=%s WHERE id=%s",
+                    (json.dumps({"etapa": "baixando zip", "processados": 0, "total": 0, "bytes_baixados": 0, "bytes_total": size}), zip_id),
+                )
+            conn_db.commit()
+            t0_dl = time.time()
+            baixado = 0
+            ultimo_progresso_dl = 0.0
+            with open(tmp_path, "wb") as fout:
+                for chunk in storage.iter_lo_bytes(conn_lo, oid):
+                    fout.write(chunk)
+                    baixado += len(chunk)
+                    # atualiza progresso de download a cada ~2s
+                    if time.time() - ultimo_progresso_dl > 2.0:
+                        ultimo_progresso_dl = time.time()
+                        try:
+                            with conn_db.cursor() as _cur:
+                                _cur.execute(
+                                    "UPDATE empresa_zips_brutos SET extracao_progresso=%s WHERE id=%s",
+                                    (json.dumps({"etapa": "baixando zip", "processados": 0, "total": 0, "bytes_baixados": baixado, "bytes_total": size}), zip_id),
+                                )
+                            conn_db.commit()
+                        except Exception:  # noqa: BLE001
+                            try:
+                                conn_db.rollback()
+                            except Exception:  # noqa: BLE001
+                                pass
+            print(f"[extracao] zip {zip_id}: download LO -> tmp em {time.time()-t0_dl:.1f}s ({baixado} bytes)")
+            try:
+                conn_lo.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+
+            _total_estimado = 0
+            with zipfile.ZipFile(tmp_path, mode="r") as zf:
                 names = [n for n in zf.namelist() if n.lower().endswith(".xml")]
                 _total_estimado = len(names)
                 # publica o total imediatamente pro frontend
@@ -782,7 +825,10 @@ def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False, empresa_id: int 
                     _flush(batch)
                 _atualiza_progresso("finalizando")
         finally:
-            reader.close()
+            try:
+                os.remove(tmp_path)
+            except Exception:  # noqa: BLE001
+                pass
             try:
                 conn_lo.rollback()
             except Exception:  # noqa: BLE001
@@ -874,93 +920,114 @@ def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False, empresa_id: int 
             pass
 
 
-@router.post("/zips/{zip_id}/extrair")
-def extrair_zip(zip_id: int, somente_s5002: bool = False, empresa_id: int | None = None):
-    """Extração SÍNCRONA (MVP). Pode demorar para zips grandes.
-
-    Query param `somente_s5002=true`: ignora completamente eventos S-1210
-    (não insere nem atualiza). Útil para re-extrair um ZIP de mês já
-    enviado e enriquecer apenas o S-5002 sem risco de tocar nos S-1210.
-
-    Query param `empresa_id`: roteia para o tenant correto. Se nao for
-    informado ou se o zip nao for achado no tenant pedido, varre os
-    tenants conhecidos (APPA, SOLUCOES) antes de devolver 404 - mesmo
-    padrao usado em /reupload pra resiliencia a search_path errado.
-    """
-    # Tenta primeiro o tenant pedido; se 404, tenta o outro tenant antes
-    # de propagar o erro. Isso protege contra:
-    #  - frontend que esquece de mandar empresa_id na query
-    #  - search_path resetando entre upload e extract (pgbouncer/pooler)
-    tenants_a_tentar: list[int | None] = []
+def _achar_tenant_do_zip(zip_id: int, empresa_id: int | None) -> int | None:
+    """Descobre em qual tenant esse zip realmente vive (consulta rapida)."""
+    candidatos: list[int] = []
     if empresa_id is not None:
-        tenants_a_tentar.append(empresa_id)
-        # adiciona fallback pro outro tenant
+        candidatos.append(empresa_id)
         outro = tenant.APPA_ID if empresa_id == tenant.SOLUCOES_ID else tenant.SOLUCOES_ID
-        tenants_a_tentar.append(outro)
+        candidatos.append(outro)
     else:
-        tenants_a_tentar = [tenant.APPA_ID, tenant.SOLUCOES_ID]
-
-    last_404: HTTPException | None = None
-    res: dict | None = None
-    tenant_usado: int | None = None
-    for eid in tenants_a_tentar:
+        candidatos = [tenant.APPA_ID, tenant.SOLUCOES_ID]
+    for eid in candidatos:
         try:
-            res = _extrair_zip_sync(zip_id, somente_s5002=somente_s5002, empresa_id=eid)
-            tenant_usado = eid
-            break
-        except HTTPException as exc:
-            if exc.status_code == 404:
-                last_404 = exc
-                continue
-            raise
-    if res is None:
-        # nao achou em nenhum tenant — adiciona diagnostico pro front
-        achou_em: list[str] = []
-        for eid in (tenant.APPA_ID, tenant.SOLUCOES_ID):
-            try:
-                with db.cursor(empresa_id=eid) as c:
-                    c.execute(
-                        "SELECT id, empresa_id, nome_arquivo_original FROM empresa_zips_brutos WHERE id=%s",
-                        (zip_id,),
-                    )
-                    r = c.fetchone()
-                if r:
-                    achou_em.append(f"tenant={eid}/empresa_id_interno={r['empresa_id']}/nome={r['nome_arquivo_original']}")
-            except Exception as _e:  # noqa: BLE001
-                achou_em.append(f"tenant={eid}/erro={_e}")
-        diag = "; ".join(achou_em) if achou_em else "nao existe em nenhum tenant conhecido"
-        raise HTTPException(
-            404,
-            f"zip não encontrado (id={zip_id}, tentou tenants={tenants_a_tentar}, diag=[{diag}])",
-        )
-    # log de atividade (best-effort)
+            with db.cursor(empresa_id=eid) as c:
+                c.execute("SELECT 1 FROM empresa_zips_brutos WHERE id=%s", (zip_id,))
+                if c.fetchone():
+                    return eid
+        except Exception:  # noqa: BLE001
+            continue
+    return None
+
+
+def _extracao_worker(zip_id: int, somente_s5002: bool, empresa_id: int) -> None:
+    """Roda _extrair_zip_sync em thread daemon. Grava erro fatal no zip row."""
     try:
-        with db.cursor() as c:
+        res = _extrair_zip_sync(zip_id, somente_s5002=somente_s5002, empresa_id=empresa_id)
+        try:
+            with db.cursor(empresa_id=empresa_id) as c:
+                c.execute(
+                    "SELECT empresa_id, nome_arquivo_original, sha256, tamanho_bytes "
+                    "FROM empresa_zips_brutos WHERE id=%s",
+                    (zip_id,),
+                )
+                row = c.fetchone()
+            if row:
+                _log_atividade(
+                    row["empresa_id"], "extracao",
+                    zip_id=zip_id,
+                    nome_arquivo=row["nome_arquivo_original"],
+                    sha256=row["sha256"],
+                    tamanho_bytes=row["tamanho_bytes"],
+                    total_xmls=res.get("total_xmls"),
+                    detalhe={
+                        "indexados": res.get("indexados"),
+                        "duplicados_id_evento": res.get("duplicados_id_evento"),
+                        "falhas": res.get("falhas"),
+                        "perapur_dominante": res.get("perapur_dominante"),
+                        "somente_s5002": somente_s5002,
+                    },
+                )
+        except Exception:  # noqa: BLE001
+            pass
+    except Exception as e:  # noqa: BLE001
+        print(f"[extracao_worker] zip {zip_id} falhou: {e}")
+        # _extrair_zip_sync ja marca status='erro' no banco, mas garante:
+        try:
+            with db.cursor(empresa_id=empresa_id) as c:
+                c.execute(
+                    "UPDATE empresa_zips_brutos SET extracao_status='erro', extracao_erro=%s WHERE id=%s",
+                    (str(e)[:1000], zip_id),
+                )
+        except Exception:  # noqa: BLE001
+            pass
+
+
+@router.post("/zips/{zip_id}/extrair", status_code=202)
+def extrair_zip(zip_id: int, somente_s5002: bool = False, empresa_id: int | None = None):
+    """Dispara extracao em background e retorna 202 imediatamente.
+
+    Cliente polla GET /zips/{id}/progresso pra acompanhar.
+    Antes era sincrono e morria em nginx 504 (>30min em zips grandes).
+    """
+    eid = _achar_tenant_do_zip(zip_id, empresa_id)
+    if eid is None:
+        raise HTTPException(404, f"zip não encontrado (id={zip_id})")
+
+    # marca como "extraindo" imediatamente pra UI ver mudanca instantanea
+    try:
+        with db.cursor(empresa_id=eid, commit=True) as c:
             c.execute(
-                "SELECT empresa_id, nome_arquivo_original, sha256, tamanho_bytes "
-                "FROM empresa_zips_brutos WHERE id=%s",
-                (zip_id,),
-            )
-            row = c.fetchone()
-        if row:
-            _log_atividade(
-                row["empresa_id"], "extracao",
-                zip_id=zip_id,
-                nome_arquivo=row["nome_arquivo_original"],
-                sha256=row["sha256"],
-                tamanho_bytes=row["tamanho_bytes"],
-                total_xmls=res.get("total_xmls"),
-                detalhe={
-                    "indexados": res.get("indexados"),
-                    "duplicados_id_evento": res.get("duplicados_id_evento"),
-                    "falhas": res.get("falhas"),
-                    "perapur_dominante": res.get("perapur_dominante"),
-                    "somente_s5002": somente_s5002,
-                },
+                "UPDATE empresa_zips_brutos SET extracao_status='extraindo', extracao_erro=NULL, "
+                "extracao_progresso=%s WHERE id=%s",
+                (json.dumps({"etapa": "iniciando", "processados": 0, "total": 0}), zip_id),
             )
     except Exception:  # noqa: BLE001
         pass
-    return res
+
+    th = threading.Thread(
+        target=_extracao_worker,
+        args=(zip_id, somente_s5002, eid),
+        daemon=True,
+        name=f"extracao-zip-{zip_id}",
+    )
+    th.start()
+    return {
+        "ok": True,
+        "zip_id": zip_id,
+        "empresa_id": eid,
+        "status": "extraindo",
+        "mensagem": "extracao iniciada em background; consulte /progresso pra acompanhar",
+    }
+
+
+def _extrair_zip_LEGACY_sync_handler(zip_id: int, somente_s5002: bool, empresa_id: int | None):
+    """DEAD CODE — mantido apenas como referencia; nao eh chamado.
+
+    A rota /extrair agora dispara em background thread; veja `extrair_zip`
+    e `_extracao_worker` acima.
+    """
+    raise RuntimeError("_extrair_zip_LEGACY_sync_handler nao deveria ser chamado")
 
 
 @router.get("/zips/{zip_id}/progresso")

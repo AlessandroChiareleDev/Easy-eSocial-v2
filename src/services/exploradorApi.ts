@@ -52,6 +52,15 @@ export interface UploadOk {
   mensagem?: string;
 }
 
+export interface ExtractStarted {
+  ok: true;
+  zip_id: number;
+  empresa_id?: number;
+  status: "extraindo" | string;
+  mensagem?: string;
+}
+
+/** Resultado consolidado da extracao (montado pelo polling no front). */
 export interface ExtractOk {
   ok: true;
   zip_id: number;
@@ -249,7 +258,49 @@ export async function extrairZip(
   if (opts?.empresaId !== undefined)
     params.set("empresa_id", String(opts.empresaId));
   const qs = params.toString() ? `?${params.toString()}` : "";
-  return postJson<ExtractOk>(`/api/explorador/zips/${zipId}/extrair${qs}`);
+  return postJson<ExtractStarted>(`/api/explorador/zips/${zipId}/extrair${qs}`);
+}
+
+/** Dispara /extrair (background) e fica em polling ate status=ok ou erro. */
+export async function extrairZipEsperarFim(
+  zipId: number,
+  opts?: {
+    somenteS5002?: boolean;
+    empresaId?: number | undefined;
+    onProgresso?: (p: ProgressoExtracao) => void;
+    intervaloMs?: number;
+  },
+): Promise<ExtractOk> {
+  await extrairZip(zipId, {
+    somenteS5002: opts?.somenteS5002 ?? false,
+    empresaId: opts?.empresaId,
+  });
+  const intervalo = opts?.intervaloMs ?? 1500;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    await new Promise((r) => setTimeout(r, intervalo));
+    let p: ProgressoExtracao;
+    try {
+      p = await progressoExtracao(zipId, { empresaId: opts?.empresaId });
+    } catch {
+      continue;
+    }
+    opts?.onProgresso?.(p);
+    if (p.status === "ok") {
+      return {
+        ok: true,
+        zip_id: zipId,
+        total_xmls: p.total || p.processados,
+        indexados: p.ok,
+        duplicados_id_evento: p.duplicados,
+        falhas: p.falhas,
+        perapur_dominante: null,
+      };
+    }
+    if (p.status === "erro") {
+      throw new Error(p.erro || "extracao falhou");
+    }
+  }
 }
 
 export interface ProgressoExtracao {

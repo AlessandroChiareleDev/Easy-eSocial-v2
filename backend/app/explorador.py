@@ -519,6 +519,35 @@ def download_zip(zip_id: int):
 # Extração
 # ---------------------------------------------------------------------------
 
+# Cache: tenants onde ja garantimos que as colunas extras existem
+_EXTRA_COLS_READY: set[int] = set()
+
+
+def _ensure_extract_columns(empresa_id: int | None) -> None:
+    """Garante que existam:
+      - explorador_eventos.xml_bytes BYTEA (storage inline rapido — substitui
+        o lobject por evento que custava 2 round trips extras pelo pooler)
+      - empresa_zips_brutos.extracao_progresso JSONB (contador ao vivo)
+    Idempotente. Chamado uma vez por tenant por processo.
+    """
+    tkey = int(empresa_id) if empresa_id is not None else 0
+    if tkey in _EXTRA_COLS_READY:
+        return
+    conn = db.connect(empresa_id=empresa_id)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "ALTER TABLE explorador_eventos ADD COLUMN IF NOT EXISTS xml_bytes BYTEA"
+            )
+            cur.execute(
+                "ALTER TABLE empresa_zips_brutos ADD COLUMN IF NOT EXISTS extracao_progresso JSONB"
+            )
+        conn.commit()
+        _EXTRA_COLS_READY.add(tkey)
+    finally:
+        conn.close()
+
+
 def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False, empresa_id: int | None = None) -> dict:
     """Lê o zip do Large Object e popula explorador_eventos.
 
@@ -532,12 +561,21 @@ def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False, empresa_id: int 
         enriquecer só o S-5002, sem risco de tocar nos S-1210.
       empresa_id: roteia para o tenant correto (default APPA=1). ZIPs da
         SOLUCOES (empresa_id=2) estão em outro banco.
+
+    PERF (2026-05-11):
+      - XML armazenado inline em `xml_bytes` (BYTEA) em vez de criar 1
+        Large Object por evento — corta 2 round trips por XML ao pooler.
+      - INSERT em batches de 200 via execute_values — corta a maioria dos
+        round trips restantes.
+      - extracao_progresso JSONB atualizada a cada batch pro frontend
+        poder mostrar progresso ao vivo via GET /zips/{id}/progresso.
     """
+    _ensure_extract_columns(empresa_id)
+
     conn_db = db.connect(empresa_id=empresa_id)
     conn_lo = db.connect(empresa_id=empresa_id)
-    conn_w = db.connect(empresa_id=empresa_id)  # escreve LOs por evento (sem invalidar reader)
     try:
-        # marca como extraindo
+        # marca como extraindo + lê metadados do zip
         with conn_db.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 "SELECT id, empresa_id, conteudo_oid, tamanho_bytes, nome_arquivo_original, dt_ini, dt_fim "
@@ -548,8 +586,9 @@ def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False, empresa_id: int 
             if not zrow:
                 raise HTTPException(404, "zip não encontrado")
             cur.execute(
-                "UPDATE empresa_zips_brutos SET extracao_status='extraindo', extracao_erro=NULL WHERE id=%s",
-                (zip_id,),
+                "UPDATE empresa_zips_brutos SET extracao_status='extraindo', extracao_erro=NULL, "
+                "extracao_progresso=%s WHERE id=%s",
+                (json.dumps({"etapa": "abrindo zip", "processados": 0, "total": 0}), zip_id),
             )
         conn_db.commit()
 
@@ -573,11 +612,96 @@ def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False, empresa_id: int 
         duplicados = 0
         per_counter: dict[str, int] = {}
 
-        # abre LO na conn_lo (transação fica aberta enquanto lê)
+        BATCH_SIZE = 200
+
+        INSERT_SQL = """
+            INSERT INTO explorador_eventos
+              (importacao_id, tipo_evento, cpf, per_apur,
+               nr_recibo, id_evento, dt_processamento,
+               cd_resposta, arquivo_origem, dados_json,
+               zip_id, xml_entry_name, referenciado_recibo,
+               xml_bytes, xml_size_bytes, xml_sha256)
+            VALUES %s
+            ON CONFLICT (id_evento) WHERE id_evento IS NOT NULL DO UPDATE
+              SET dados_json = EXCLUDED.dados_json
+              WHERE explorador_eventos.tipo_evento IN ('S-1210','S-5002')
+                AND (
+                  explorador_eventos.dados_json IS NULL
+                  OR NOT (
+                    explorador_eventos.dados_json ? 'pagamentos'
+                    OR explorador_eventos.dados_json ? 'infoIRCR'
+                    OR explorador_eventos.dados_json ? 'infoIR'
+                    OR explorador_eventos.dados_json ? 'totApurMen_CRMen'
+                  )
+                )
+            RETURNING (xmax = 0) AS inserted_new
+        """
+
+        def _atualiza_progresso(etapa: str) -> None:
+            try:
+                payload = {
+                    "etapa": etapa,
+                    "processados": total,
+                    "ok": ok,
+                    "duplicados": duplicados,
+                    "falhas": falhas,
+                    "total": _total_estimado,
+                }
+                with conn_db.cursor() as _cur:
+                    _cur.execute(
+                        "UPDATE empresa_zips_brutos SET extracao_progresso=%s WHERE id=%s",
+                        (json.dumps(payload), zip_id),
+                    )
+                conn_db.commit()
+            except Exception:  # noqa: BLE001
+                try:
+                    conn_db.rollback()
+                except Exception:  # noqa: BLE001
+                    pass
+
+        def _flush(batch: list[tuple]) -> None:
+            nonlocal ok, duplicados
+            if not batch:
+                return
+            from psycopg2.extras import execute_values as _ev
+            with conn_db.cursor() as _cur:
+                ret = _ev(_cur, INSERT_SQL, batch, fetch=True, page_size=BATCH_SIZE)
+            inserted_new = sum(1 for r in ret if r[0])
+            # rows que conflitaram E o WHERE bloqueou o UPDATE nao retornam
+            # → caem em (len(batch) - len(ret)) "duplicados puros".
+            # rows que conflitaram MAS deram UPDATE retornam com inserted_new=False
+            # → tambem contam como duplicados (linha ja existia).
+            ok += inserted_new
+            duplicados += (len(batch) - inserted_new)
+            conn_db.commit()
+
+        # abre LO do zip na conn_lo
         reader = storage.LargeObjectReader(conn_lo, oid, size)
+        _total_estimado = 0
         try:
             with zipfile.ZipFile(reader, mode="r") as zf:
                 names = [n for n in zf.namelist() if n.lower().endswith(".xml")]
+                _total_estimado = len(names)
+                # publica o total imediatamente pro frontend
+                with conn_db.cursor() as cur:
+                    cur.execute(
+                        "UPDATE empresa_zips_brutos SET total_xmls=%s, extracao_progresso=%s WHERE id=%s",
+                        (
+                            _total_estimado,
+                            json.dumps({
+                                "etapa": "extraindo",
+                                "processados": 0,
+                                "ok": 0,
+                                "duplicados": 0,
+                                "falhas": 0,
+                                "total": _total_estimado,
+                            }),
+                            zip_id,
+                        ),
+                    )
+                conn_db.commit()
+
+                batch: list[tuple] = []
                 for name in names:
                     total += 1
                     try:
@@ -587,28 +711,16 @@ def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False, empresa_id: int 
                         if evt is None:
                             falhas += 1
                             continue
-                        # Modo "somente S-5002": pula totalmente qualquer
-                        # evento que não seja S-5002 (S-1210 e demais).
                         if somente_s5002 and evt.tipo_evento != "S-5002":
                             continue
                         if evt.per_apur:
                             per_counter[evt.per_apur] = per_counter.get(evt.per_apur, 0) + 1
-                        # cria 1 Large Object por evento (xml_oid).
-                        # Usa conn_w (terceira conexao) para que commits
-                        # incrementais nao invalidem o LO descriptor que
-                        # mantem o ZipFile aberto em conn_lo.
+
                         import hashlib as _hl
-                        x_lo = conn_w.lobject(0, mode="wb")
-                        x_oid = x_lo.oid
-                        try:
-                            x_lo.write(data)
-                        finally:
-                            x_lo.close()
                         x_size = len(data)
                         x_sha = _hl.sha256(data).hexdigest()
-                        # Enriquece dados_json para S-1210 e S-5002 com os
-                        # campos lidos do XML (pagamentos, infoIRCR, etc.) —
-                        # demais eventos seguem com {nome_tecnico} apenas.
+
+                        # Enriquece dados_json para S-1210 e S-5002.
                         dados_json_payload: dict = {"nome_tecnico": evt.nome_tecnico}
                         try:
                             if evt.tipo_evento == "S-1210":
@@ -632,94 +744,47 @@ def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False, empresa_id: int 
                                     "totApurMen_vlrCRMen": d.get("totApurMen_vlrCRMen"),
                                 })
                         except Exception as _ex_enrich:  # noqa: BLE001
-                            # Falha de enriquecimento não derruba indexação;
-                            # mantemos pelo menos {nome_tecnico} pra não
-                            # quebrar inserts existentes.
                             print(f"[WARN] enrich dados_json ({evt.tipo_evento}): {_ex_enrich}")
 
-                        with conn_db.cursor() as cur2:
-                            cur2.execute(
-                                """
-                                INSERT INTO explorador_eventos
-                                  (importacao_id, tipo_evento, cpf, per_apur,
-                                   nr_recibo, id_evento, dt_processamento,
-                                   cd_resposta, arquivo_origem, dados_json,
-                                   zip_id, xml_entry_name, referenciado_recibo,
-                                   xml_oid, xml_size_bytes, xml_sha256)
-                                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                                ON CONFLICT (id_evento) WHERE id_evento IS NOT NULL DO UPDATE
-                                  SET dados_json = EXCLUDED.dados_json
-                                  WHERE explorador_eventos.tipo_evento IN ('S-1210','S-5002')
-                                    AND (
-                                      explorador_eventos.dados_json IS NULL
-                                      OR NOT (
-                                        explorador_eventos.dados_json ? 'pagamentos'
-                                        OR explorador_eventos.dados_json ? 'infoIRCR'
-                                        OR explorador_eventos.dados_json ? 'infoIR'
-                                        OR explorador_eventos.dados_json ? 'totApurMen_CRMen'
-                                      )
-                                    )
-                                RETURNING id, (xmax = 0) AS inserted_new
-                                """,
-                                (
-                                    importacao_id,
-                                    evt.tipo_evento,
-                                    evt.cpf,
-                                    evt.per_apur,
-                                    evt.nr_recibo,
-                                    evt.id_evento,
-                                    evt.dt_processamento,
-                                    evt.cd_resposta,
-                                    name,
-                                    json.dumps(dados_json_payload),
-                                    zip_id,
-                                    name,
-                                    evt.referenciado_recibo,
-                                    x_oid,
-                                    x_size,
-                                    x_sha,
-                                ),
-                            )
-                            row_ret = cur2.fetchone()
-                        # RETURNING devolve linha em INSERT e em UPDATE; só
-                        # devolve None se o ON CONFLICT bater no WHERE e
-                        # filtrar (linha já tinha dados_json rico).
-                        # row_ret é tupla: (id, inserted_new_bool)
-                        inserted = bool(row_ret and row_ret[1])
-                        if row_ret is None:
-                            # já existia e dados_json já era rico → duplicado puro
-                            duplicados += 1
-                            try:
-                                storage.unlink_lo(conn_w, x_oid)
-                            except Exception:  # noqa: BLE001
-                                pass
-                        elif not inserted:
-                            # UPDATE (enriqueceu dados_json de linha antiga)
-                            duplicados += 1
-                            # LO criado virou órfão (linha antiga já tem xml_oid)
-                            try:
-                                storage.unlink_lo(conn_w, x_oid)
-                            except Exception:  # noqa: BLE001
-                                pass
-                        else:
-                            ok += 1
-                        # commit em lotes
-                        if (ok + duplicados) % 500 == 0:
-                            conn_db.commit()
-                            conn_w.commit()
+                        batch.append((
+                            importacao_id,
+                            evt.tipo_evento,
+                            evt.cpf,
+                            evt.per_apur,
+                            evt.nr_recibo,
+                            evt.id_evento,
+                            evt.dt_processamento,
+                            evt.cd_resposta,
+                            name,
+                            json.dumps(dados_json_payload),
+                            zip_id,
+                            name,
+                            evt.referenciado_recibo,
+                            psycopg2.Binary(data),
+                            x_size,
+                            x_sha,
+                        ))
+
+                        if len(batch) >= BATCH_SIZE:
+                            _flush(batch)
+                            batch = []
+                            _atualiza_progresso("extraindo")
                     except Exception as ex_inner:  # noqa: BLE001
                         falhas += 1
-                        conn_db.rollback()
                         try:
-                            conn_w.rollback()
+                            conn_db.rollback()
                         except Exception:  # noqa: BLE001
                             pass
-                conn_db.commit()
-                conn_w.commit()
+                        print(f"[WARN] falha XML {name}: {ex_inner}")
+
+                # flush final
+                if batch:
+                    _flush(batch)
+                _atualiza_progresso("finalizando")
         finally:
             reader.close()
             try:
-                conn_lo.rollback()  # libera transacao do LO do zip
+                conn_lo.rollback()
             except Exception:  # noqa: BLE001
                 pass
 
@@ -733,16 +798,30 @@ def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False, empresa_id: int 
                 SET extracao_status='ok',
                     extraido_em=now(),
                     total_xmls=%s,
-                    perapur_dominante=%s
+                    perapur_dominante=%s,
+                    extracao_progresso=%s
                 WHERE id=%s
                 """,
-                (total, per_dom, zip_id),
+                (
+                    total,
+                    per_dom,
+                    json.dumps({
+                        "etapa": "ok",
+                        "processados": total,
+                        "ok": ok,
+                        "duplicados": duplicados,
+                        "falhas": falhas,
+                        "total": total,
+                    }),
+                    zip_id,
+                ),
             )
             cur.execute(
                 "UPDATE explorador_importacoes SET total_arquivos=%s, importado_em=now() WHERE id=%s",
                 (total, importacao_id),
             )
         conn_db.commit()
+
         # backfill chain walk para o(s) per_apur que apareceram neste zip
         try:
             from . import backfill_chain
@@ -785,10 +864,6 @@ def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False, empresa_id: int 
             pass
         raise
     finally:
-        try:
-            conn_w.close()
-        except Exception:  # noqa: BLE001
-            pass
         try:
             conn_lo.close()
         except Exception:  # noqa: BLE001
@@ -886,6 +961,57 @@ def extrair_zip(zip_id: int, somente_s5002: bool = False, empresa_id: int | None
     except Exception:  # noqa: BLE001
         pass
     return res
+
+
+@router.get("/zips/{zip_id}/progresso")
+def progresso_extracao(zip_id: int, empresa_id: int | None = None):
+    """Retorna o progresso da extracao para polling no frontend.
+
+    Procura o zip no tenant pedido e cai pra os outros tenants conhecidos
+    se nao achar (mesmo padrao do /extrair).
+    """
+    if empresa_id is not None:
+        tenants_a_tentar: list[int] = [empresa_id]
+        outro = tenant.APPA_ID if empresa_id == tenant.SOLUCOES_ID else tenant.SOLUCOES_ID
+        if outro not in tenants_a_tentar:
+            tenants_a_tentar.append(outro)
+    else:
+        tenants_a_tentar = [tenant.APPA_ID, tenant.SOLUCOES_ID]
+
+    for eid in tenants_a_tentar:
+        try:
+            with db.cursor(empresa_id=eid) as c:
+                c.execute(
+                    "SELECT extracao_status, total_xmls, extracao_progresso, extracao_erro "
+                    "FROM empresa_zips_brutos WHERE id=%s",
+                    (zip_id,),
+                )
+                row = c.fetchone()
+        except Exception:  # noqa: BLE001
+            row = None
+        if row:
+            prog = row.get("extracao_progresso") or {}
+            if isinstance(prog, str):
+                try:
+                    prog = json.loads(prog)
+                except Exception:  # noqa: BLE001
+                    prog = {}
+            proc = int(prog.get("processados") or 0)
+            total = int(prog.get("total") or row.get("total_xmls") or 0)
+            pct = round(100.0 * proc / total, 1) if total else 0.0
+            return {
+                "status": row.get("extracao_status"),
+                "etapa": prog.get("etapa"),
+                "processados": proc,
+                "total": total,
+                "ok": int(prog.get("ok") or 0),
+                "duplicados": int(prog.get("duplicados") or 0),
+                "falhas": int(prog.get("falhas") or 0),
+                "percent": pct,
+                "erro": row.get("extracao_erro"),
+                "empresa_id": eid,
+            }
+    raise HTTPException(404, "zip não encontrado")
 
 
 # ---------------------------------------------------------------------------
@@ -1165,7 +1291,7 @@ def baixar_xml(evento_id: int):
     with db.cursor() as c:
         c.execute(
             """
-            SELECT e.id, e.xml_entry_name, e.zip_id, e.xml_oid, e.xml_size_bytes,
+            SELECT e.id, e.xml_entry_name, e.zip_id, e.xml_oid, e.xml_bytes, e.xml_size_bytes,
                    z.conteudo_oid, z.tamanho_bytes, z.nome_arquivo_original
             FROM explorador_eventos e
             JOIN empresa_zips_brutos z ON z.id = e.zip_id
@@ -1179,6 +1305,12 @@ def baixar_xml(evento_id: int):
 
     filename = row["xml_entry_name"] or f"evento_{evento_id}.xml"
     headers = {"Content-Disposition": f'inline; filename="{filename}"'}
+
+    # Caminho 0: bytes inline na coluna xml_bytes (formato novo, rapido)
+    xb = row.get("xml_bytes")
+    if xb is not None:
+        data = bytes(xb)
+        return StreamingResponse(iter([data]), media_type="application/xml", headers=headers)
 
     # Caminho 1: temos LO dedicado
     if row.get("xml_oid") is not None:

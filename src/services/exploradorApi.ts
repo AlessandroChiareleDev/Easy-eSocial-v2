@@ -252,6 +252,32 @@ export async function extrairZip(
   return postJson<ExtractOk>(`/api/explorador/zips/${zipId}/extrair${qs}`);
 }
 
+export interface ProgressoExtracao {
+  status: string | null;
+  etapa: string | null;
+  processados: number;
+  total: number;
+  ok: number;
+  duplicados: number;
+  falhas: number;
+  percent: number;
+  erro: string | null;
+  empresa_id: number;
+}
+
+export async function progressoExtracao(
+  zipId: number,
+  opts?: { empresaId?: number | undefined },
+): Promise<ProgressoExtracao> {
+  const params = new URLSearchParams();
+  if (opts?.empresaId !== undefined)
+    params.set("empresa_id", String(opts.empresaId));
+  const qs = params.toString() ? `?${params.toString()}` : "";
+  return getJson<ProgressoExtracao>(
+    `/api/explorador/zips/${zipId}/progresso${qs}`,
+  );
+}
+
 export interface AnaliseS5002PerApur {
   per_apur: string;
   cpfs_s1210: number;

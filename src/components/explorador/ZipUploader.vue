@@ -4,6 +4,7 @@ import {
   uploadZip,
   detalheZip,
   extrairZip,
+  progressoExtracao,
   formatBytes,
   formatRate,
   formatSeconds,
@@ -114,6 +115,37 @@ const handle = ref<UploadHandle | null>(null);
 
 // Pico observado para mostrar "máx" (curiosidade visual)
 const peakRate = ref(0);
+
+// Progresso da extração (polling no endpoint /progresso)
+interface ExtracaoProg {
+  processados: number;
+  total: number;
+  percent: number;
+  ok: number;
+  duplicados: number;
+  falhas: number;
+  etapa: string;
+}
+const extracaoProg = ref<ExtracaoProg>({
+  processados: 0,
+  total: 0,
+  percent: 0,
+  ok: 0,
+  duplicados: 0,
+  falhas: 0,
+  etapa: "",
+});
+function resetExtracaoProg() {
+  extracaoProg.value = {
+    processados: 0,
+    total: 0,
+    percent: 0,
+    ok: 0,
+    duplicados: 0,
+    falhas: 0,
+    etapa: "",
+  };
+}
 
 let pollTimer: number | null = null;
 // Flag para cancelar o loop sequencial
@@ -228,11 +260,47 @@ async function uploadUm(f: File): Promise<void> {
 
     log("ok", `upload ok → zip_id=${res.zip_id}, iniciando extração`, f.name);
     phase.value = "extraindo";
+    resetExtracaoProg();
+    // polling do progresso enquanto a extracao roda no backend
+    let lastPctLogado = -1;
+    const pollId = window.setInterval(async () => {
+      try {
+        const p = await progressoExtracao(res.zip_id, {
+          empresaId: empresaIdSnapshot,
+        });
+        extracaoProg.value = {
+          processados: p.processados,
+          total: p.total,
+          percent: p.percent,
+          ok: p.ok,
+          duplicados: p.duplicados,
+          falhas: p.falhas,
+          etapa: p.etapa ?? "",
+        };
+        // loga marcos de 10 em 10%
+        const marco = Math.floor(p.percent / 10) * 10;
+        if (marco > lastPctLogado && p.total > 0) {
+          lastPctLogado = marco;
+          log(
+            "info",
+            `⚙ ${p.processados}/${p.total} (${p.percent}%)`,
+            f.name,
+          );
+        }
+      } catch {
+        // ignora erro de polling — o extrair em si vai retornar/falhar
+      }
+    }, 1500);
     // Usa extrairZip do exploradorApi (injeta Authorization Bearer + X-Empresa-CNPJ).
     // Usa o MESMO empresaId capturado no upload pra garantir consistencia de tenant.
-    const extractStats = await extrairZip(res.zip_id, {
-      empresaId: empresaIdSnapshot,
-    });
+    let extractStats;
+    try {
+      extractStats = await extrairZip(res.zip_id, {
+        empresaId: empresaIdSnapshot,
+      });
+    } finally {
+      window.clearInterval(pollId);
+    }
     log(
       "ok",
       `extração ok: ${extractStats.indexados}/${extractStats.total_xmls} XMLs indexados` +
@@ -541,6 +609,18 @@ const totaisAgregados = computed(() => {
         <div class="ex-title gg-glow">Extraindo XMLs do zip…</div>
         <div class="ex-sub">
           <strong>{{ file?.name }}</strong> — Indexando eventos eSocial.
+        </div>
+        <div class="ex-progress" v-if="extracaoProg.total > 0 || extracaoProg.processados > 0">
+          <div class="ex-bar">
+            <div class="ex-bar-fill" :style="{ width: extracaoProg.percent + '%' }"></div>
+          </div>
+          <div class="ex-counter mono">
+            {{ extracaoProg.processados }} / {{ extracaoProg.total || '?' }} XMLs
+            <span v-if="extracaoProg.total">· {{ extracaoProg.percent }}%</span>
+            <span v-if="extracaoProg.ok"> · {{ extracaoProg.ok }} novos</span>
+            <span v-if="extracaoProg.duplicados"> · {{ extracaoProg.duplicados }} dup</span>
+            <span v-if="extracaoProg.falhas"> · {{ extracaoProg.falhas }} falhas</span>
+          </div>
         </div>
       </div>
     </template>
@@ -878,6 +958,32 @@ const totaisAgregados = computed(() => {
 .ex-sub {
   color: rgba(240, 209, 229, 0.7);
   font-size: 0.9rem;
+}
+.ex-progress {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+}
+.ex-bar {
+  width: min(420px, 80%);
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(240, 209, 229, 0.1);
+  overflow: hidden;
+}
+.ex-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #c44a8a, #f5b3d8);
+  box-shadow: 0 0 12px rgba(196, 74, 138, 0.5);
+  transition: width 0.4s ease;
+}
+.ex-counter {
+  color: rgba(240, 209, 229, 0.85);
+  font-size: 0.85rem;
+  letter-spacing: 0.02em;
 }
 
 /* Done */

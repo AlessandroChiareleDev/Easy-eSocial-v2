@@ -39,6 +39,54 @@ interface FileResult {
 }
 const resultados = ref<FileResult[]>([]);
 
+// --- Terminal de logs (timeline visual de cada passo) ---
+type LogLevel = "info" | "ok" | "warn" | "err" | "step";
+interface LogLine {
+  t: string; // HH:MM:SS
+  arquivo?: string;
+  nivel: LogLevel;
+  msg: string;
+}
+const logs = ref<LogLine[]>([]);
+const termRef = ref<HTMLElement | null>(null);
+function hora() {
+  const d = new Date();
+  return (
+    String(d.getHours()).padStart(2, "0") +
+    ":" +
+    String(d.getMinutes()).padStart(2, "0") +
+    ":" +
+    String(d.getSeconds()).padStart(2, "0")
+  );
+}
+function log(nivel: LogLevel, msg: string, arquivo?: string) {
+  logs.value.push({ t: hora(), nivel, msg, arquivo });
+  // auto-scroll
+  requestAnimationFrame(() => {
+    if (termRef.value) termRef.value.scrollTop = termRef.value.scrollHeight;
+  });
+}
+function humanizeErro(raw: string): string {
+  // Pega payloads {"detail":"..."} e tenta dar contexto util
+  try {
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (m) {
+      const j = JSON.parse(m[0]);
+      if (j.detail) return String(j.detail);
+    }
+  } catch {
+    // ignore
+  }
+  if (/Failed to fetch|NetworkError/i.test(raw))
+    return "rede caiu / backend offline";
+  if (/401/.test(raw)) return "sessão expirou — refaça o login";
+  if (/403/.test(raw)) return "sem permissão pra essa empresa";
+  if (/404/.test(raw)) return "zip não encontrado no banco (após upload)";
+  if (/413/.test(raw)) return "arquivo grande demais";
+  if (/timeout/i.test(raw)) return "timeout — servidor demorou demais";
+  return raw;
+}
+
 // Compat: alguns trechos do template ainda referenciam "file"
 const file = computed<File | null>(
   () => files.value[currentIdx.value] ?? files.value[0] ?? null,
@@ -133,6 +181,11 @@ async function uploadUm(f: File): Promise<void> {
   // Captura o empresaId no momento do upload e usa o MESMO valor no extrair.
   // Evita race se o usuario trocar de empresa enquanto sobe.
   const empresaIdSnapshot = props.empresaId;
+  log(
+    "step",
+    `▶ início (empresa_id=${empresaIdSnapshot}, ${formatBytes(f.size)}, período ${dtIni.value}→${dtFim.value})`,
+    f.name,
+  );
 
   const h = uploadZip({
     file: f,
@@ -145,6 +198,7 @@ async function uploadUm(f: File): Promise<void> {
     },
     onUploadFinished: () => {
       phase.value = "finalizing";
+      log("info", "bytes recebidos — calculando SHA-256 + gravando", f.name);
     },
   });
   handle.value = h;
@@ -154,6 +208,7 @@ async function uploadUm(f: File): Promise<void> {
     handle.value = null;
 
     if (res.duplicado) {
+      log("warn", `zip já existia (zip_id=${res.zip_id}) — nada gravado`, f.name);
       const det = await detalheZip(res.zip_id);
       emit("uploaded", det.zip);
       resultados.value.push({
@@ -165,12 +220,21 @@ async function uploadUm(f: File): Promise<void> {
       return;
     }
 
+    log("ok", `upload ok → zip_id=${res.zip_id}, iniciando extração`, f.name);
     phase.value = "extraindo";
     // Usa extrairZip do exploradorApi (injeta Authorization Bearer + X-Empresa-CNPJ).
     // Usa o MESMO empresaId capturado no upload pra garantir consistencia de tenant.
     const extractStats = await extrairZip(res.zip_id, {
       empresaId: empresaIdSnapshot,
     });
+    log(
+      "ok",
+      `extração ok: ${extractStats.indexados}/${extractStats.total_xmls} XMLs indexados` +
+        (extractStats.duplicados_id_evento
+          ? ` (♻ ${extractStats.duplicados_id_evento} dup ignorados)`
+          : ""),
+      f.name,
+    );
     const det = await detalheZip(res.zip_id);
     emit("uploaded", det.zip);
     resultados.value.push({
@@ -184,13 +248,17 @@ async function uploadUm(f: File): Promise<void> {
   } catch (e) {
     handle.value = null;
     if ((e as DOMException)?.name === "AbortError") {
+      log("warn", "cancelado", f.name);
       resultados.value.push({ nome: f.name, ok: false, erro: "cancelado" });
       throw e;
     }
+    const raw = (e as Error).message || "falha";
+    const erro = humanizeErro(raw);
+    log("err", erro, f.name);
     resultados.value.push({
       nome: f.name,
       ok: false,
-      erro: (e as Error).message || "falha",
+      erro,
     });
     // NAO relanca: queremos continuar pros proximos arquivos
   }
@@ -200,13 +268,16 @@ async function startUpload() {
   if (files.value.length === 0) return;
   errorMsg.value = null;
   resultados.value = [];
+  logs.value = [];
   cancelLoop = false;
+  log("step", `═ Lote iniciado: ${files.value.length} arquivo(s) ═`);
 
   for (let i = 0; i < files.value.length; i++) {
     if (cancelLoop) break;
     const f = files.value[i];
     if (!f) continue;
     currentIdx.value = i;
+    log("step", `─── [${i + 1}/${files.value.length}] ${f.name} ───`);
     try {
       await uploadUm(f);
     } catch (e) {
@@ -222,6 +293,10 @@ async function startUpload() {
   // Resumo final
   const okN = resultados.value.filter((r) => r.ok).length;
   const falhaN = resultados.value.filter((r) => !r.ok).length;
+  log(
+    falhaN === 0 ? "ok" : okN === 0 ? "err" : "warn",
+    `═ Fim do lote: ${okN} ok / ${falhaN} falha(s) ═`,
+  );
   if (falhaN === 0) {
     phase.value = "ok";
   } else if (okN === 0) {
@@ -246,6 +321,7 @@ function reset() {
   files.value = [];
   currentIdx.value = 0;
   resultados.value = [];
+  logs.value = [];
   phase.value = "idle";
   progress.value = null;
   errorMsg.value = null;
@@ -533,6 +609,33 @@ const totaisAgregados = computed(() => {
         <button class="btn-primary" @click="reset">+ Subir outro(s)</button>
       </div>
     </template>
+
+    <!-- TERMINAL DE LOGS (sempre visivel quando ha qualquer log) -->
+    <div v-if="logs.length > 0" class="term-panel">
+      <div class="term-head">
+        <span class="term-dot r"></span>
+        <span class="term-dot y"></span>
+        <span class="term-dot g"></span>
+        <span class="term-title mono">upload.log</span>
+        <button
+          class="btn-ghost btn-xs term-clear"
+          @click="logs = []"
+          title="Limpar log"
+        >
+          limpar
+        </button>
+      </div>
+      <pre ref="termRef" class="term-body mono">
+<span
+            v-for="(l, i) in logs"
+            :key="i"
+            :class="['term-line', `lvl-${l.nivel}`]"
+          ><span class="term-t">[{{ l.t }}]</span><span
+              v-if="l.arquivo"
+              class="term-arq"
+            > {{ l.arquivo }}</span><span class="term-msg"> {{ l.msg }}</span>
+</span></pre>
+    </div>
   </div>
 </template>
 
@@ -990,5 +1093,103 @@ const totaisAgregados = computed(() => {
   background: rgba(61, 242, 75, 0.1);
   color: #3df24b;
   border: 1px solid rgba(61, 242, 75, 0.3);
+}
+
+/* ───────── Terminal de logs ───────── */
+.term-panel {
+  margin-top: 18px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #0a0d0a;
+  border: 1px solid rgba(61, 242, 75, 0.25);
+  box-shadow: 0 0 16px rgba(61, 242, 75, 0.08);
+  font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+}
+.term-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: linear-gradient(180deg, #15191a, #0f1213);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.term-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.term-dot.r {
+  background: #ff5f56;
+}
+.term-dot.y {
+  background: #ffbd2e;
+}
+.term-dot.g {
+  background: #27c93f;
+}
+.term-title {
+  margin-left: 10px;
+  font-size: 0.78rem;
+  color: rgba(240, 209, 229, 0.65);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.term-clear {
+  margin-left: auto;
+}
+.term-body {
+  margin: 0;
+  padding: 12px 14px;
+  max-height: 320px;
+  overflow-y: auto;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #c4d0c5;
+  background: #0a0d0a;
+}
+.term-body::-webkit-scrollbar {
+  width: 8px;
+}
+.term-body::-webkit-scrollbar-thumb {
+  background: rgba(61, 242, 75, 0.25);
+  border-radius: 4px;
+}
+.term-line {
+  display: block;
+}
+.term-t {
+  color: rgba(240, 209, 229, 0.4);
+}
+.term-arq {
+  color: #f0d1e5;
+  font-weight: 600;
+}
+.term-msg {
+  color: #c4d0c5;
+}
+.lvl-info .term-msg {
+  color: #9ccbff;
+}
+.lvl-ok .term-msg {
+  color: #3df24b;
+}
+.lvl-warn .term-msg {
+  color: #ffd56a;
+}
+.lvl-err .term-msg {
+  color: #ff7a7a;
+  font-weight: 600;
+}
+.lvl-step {
+  border-left: 2px solid rgba(61, 242, 75, 0.55);
+  padding-left: 6px;
+  margin-left: -8px;
+}
+.lvl-step .term-msg {
+  color: #3df24b;
+  font-weight: 700;
 }
 </style>

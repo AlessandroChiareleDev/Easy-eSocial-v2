@@ -807,10 +807,40 @@ def extrair_zip(zip_id: int, somente_s5002: bool = False, empresa_id: int | None
     (não insere nem atualiza). Útil para re-extrair um ZIP de mês já
     enviado e enriquecer apenas o S-5002 sem risco de tocar nos S-1210.
 
-    Query param `empresa_id`: roteia para o tenant correto. Sem isso,
-    cai no default (APPA) e ZIPs de outros tenants viram "não encontrado".
+    Query param `empresa_id`: roteia para o tenant correto. Se nao for
+    informado ou se o zip nao for achado no tenant pedido, varre os
+    tenants conhecidos (APPA, SOLUCOES) antes de devolver 404 - mesmo
+    padrao usado em /reupload pra resiliencia a search_path errado.
     """
-    res = _extrair_zip_sync(zip_id, somente_s5002=somente_s5002, empresa_id=empresa_id)
+    # Tenta primeiro o tenant pedido; se 404, tenta o outro tenant antes
+    # de propagar o erro. Isso protege contra:
+    #  - frontend que esquece de mandar empresa_id na query
+    #  - search_path resetando entre upload e extract (pgbouncer/pooler)
+    tenants_a_tentar: list[int | None] = []
+    if empresa_id is not None:
+        tenants_a_tentar.append(empresa_id)
+        # adiciona fallback pro outro tenant
+        outro = tenant.APPA_ID if empresa_id == tenant.SOLUCOES_ID else tenant.SOLUCOES_ID
+        tenants_a_tentar.append(outro)
+    else:
+        tenants_a_tentar = [tenant.APPA_ID, tenant.SOLUCOES_ID]
+
+    last_404: HTTPException | None = None
+    res: dict | None = None
+    tenant_usado: int | None = None
+    for eid in tenants_a_tentar:
+        try:
+            res = _extrair_zip_sync(zip_id, somente_s5002=somente_s5002, empresa_id=eid)
+            tenant_usado = eid
+            break
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                last_404 = exc
+                continue
+            raise
+    if res is None:
+        # nao achou em nenhum tenant
+        raise last_404 or HTTPException(404, "zip não encontrado")
     # log de atividade (best-effort)
     try:
         with db.cursor() as c:

@@ -60,7 +60,9 @@ function hora() {
   );
 }
 function log(nivel: LogLevel, msg: string, arquivo?: string) {
-  logs.value.push({ t: hora(), nivel, msg, arquivo });
+  const line: LogLine = { t: hora(), nivel, msg };
+  if (arquivo !== undefined) line.arquivo = arquivo;
+  logs.value.push(line);
   // auto-scroll
   requestAnimationFrame(() => {
     if (termRef.value) termRef.value.scrollTop = termRef.value.scrollHeight;
@@ -208,7 +210,11 @@ async function uploadUm(f: File): Promise<void> {
     handle.value = null;
 
     if (res.duplicado) {
-      log("warn", `zip já existia (zip_id=${res.zip_id}) — nada gravado`, f.name);
+      log(
+        "warn",
+        `zip já existia (zip_id=${res.zip_id}) — nada gravado`,
+        f.name,
+      );
       const det = await detalheZip(res.zip_id);
       emit("uploaded", det.zip);
       resultados.value.push({

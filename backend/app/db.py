@@ -21,8 +21,26 @@ def _resolve_cfg(empresa_id):
 
 
 def connect(empresa_id: Optional[int] = None):
-    """Abre uma nova conexao. Caller eh responsavel por fechar."""
-    return psycopg2.connect(**_resolve_cfg(empresa_id))
+    """Abre uma nova conexao. Caller eh responsavel por fechar.
+
+    IMPORTANTE: o pooler do Supabase (pgbouncer transaction mode) NAO
+    propaga o `options=-csearch_path=...` corretamente entre conexoes.
+    Por isso, alem do startup option, executamos SET search_path
+    explicitamente apos conectar pra garantir o tenant certo.
+    """
+    from . import tenant as _tenant
+    cfg = _resolve_cfg(empresa_id)
+    conn = psycopg2.connect(**cfg)
+    eid = empresa_id if empresa_id is not None else _tenant.APPA_ID
+    schema = _tenant._EMPRESA_SCHEMA.get(int(eid), "public")
+    try:
+        with conn.cursor() as _c:
+            _c.execute(f'SET search_path TO "{schema}", public')
+        conn.commit()
+    except Exception:
+        conn.close()
+        raise
+    return conn
 
 
 @contextmanager

@@ -839,8 +839,25 @@ def extrair_zip(zip_id: int, somente_s5002: bool = False, empresa_id: int | None
                 continue
             raise
     if res is None:
-        # nao achou em nenhum tenant
-        raise last_404 or HTTPException(404, "zip não encontrado")
+        # nao achou em nenhum tenant — adiciona diagnostico pro front
+        achou_em: list[str] = []
+        for eid in (tenant.APPA_ID, tenant.SOLUCOES_ID):
+            try:
+                with db.cursor(empresa_id=eid) as c:
+                    c.execute(
+                        "SELECT id, empresa_id, nome_arquivo_original FROM empresa_zips_brutos WHERE id=%s",
+                        (zip_id,),
+                    )
+                    r = c.fetchone()
+                if r:
+                    achou_em.append(f"tenant={eid}/empresa_id_interno={r['empresa_id']}/nome={r['nome_arquivo_original']}")
+            except Exception as _e:  # noqa: BLE001
+                achou_em.append(f"tenant={eid}/erro={_e}")
+        diag = "; ".join(achou_em) if achou_em else "nao existe em nenhum tenant conhecido"
+        raise HTTPException(
+            404,
+            f"zip não encontrado (id={zip_id}, tentou tenants={tenants_a_tentar}, diag=[{diag}])",
+        )
     # log de atividade (best-effort)
     try:
         with db.cursor() as c:

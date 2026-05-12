@@ -616,7 +616,7 @@ def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False, empresa_id: int 
         duplicados = 0
         per_counter: dict[str, int] = {}
 
-        BATCH_SIZE = 200
+        BATCH_SIZE = 25
 
         INSERT_SQL = """
             INSERT INTO explorador_eventos
@@ -641,7 +641,14 @@ def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False, empresa_id: int 
             RETURNING (xmax = 0) AS inserted_new
         """
 
-        def _atualiza_progresso(etapa: str) -> None:
+        _last_progress_update = 0.0
+
+        def _atualiza_progresso(etapa: str, force: bool = False) -> None:
+            nonlocal _last_progress_update
+            now_ts = time.time()
+            if not force and (now_ts - _last_progress_update) < 2.0:
+                return
+            _last_progress_update = now_ts
             try:
                 payload = {
                     "etapa": etapa,
@@ -747,9 +754,11 @@ def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False, empresa_id: int 
                 batch: list[tuple] = []
                 for name in names:
                     total += 1
+                    _atualiza_progresso("lendo xml")
                     try:
                         with zf.open(name) as fh:
                             data = fh.read()
+                        _atualiza_progresso("parseando xml")
                         evt = parse_xml_bytes(data)
                         if evt is None:
                             falhas += 1
@@ -767,6 +776,7 @@ def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False, empresa_id: int 
                         dados_json_payload: dict = {"nome_tecnico": evt.nome_tecnico}
                         try:
                             if evt.tipo_evento == "S-1210":
+                                _atualiza_progresso("enriquecendo S-1210")
                                 from .xml_extractor import extrair_s1210 as _ex_s1210
                                 d = _ex_s1210(data) or {}
                                 dados_json_payload.update({
@@ -777,6 +787,7 @@ def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False, empresa_id: int 
                                     "nrReciboAtual": d.get("nr_recibo_atual"),
                                 })
                             elif evt.tipo_evento == "S-5002":
+                                _atualiza_progresso("enriquecendo S-5002")
                                 from .xml_extractor import extrair_s5002 as _ex_s5002
                                 d = _ex_s5002(data) or {}
                                 dados_json_payload.update({
@@ -809,9 +820,10 @@ def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False, empresa_id: int 
                         ))
 
                         if len(batch) >= BATCH_SIZE:
+                            _atualiza_progresso("gravando batch", force=True)
                             _flush(batch)
                             batch = []
-                            _atualiza_progresso("extraindo")
+                            _atualiza_progresso("extraindo", force=True)
                     except Exception as ex_inner:  # noqa: BLE001
                         falhas += 1
                         try:
@@ -822,8 +834,9 @@ def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False, empresa_id: int 
 
                 # flush final
                 if batch:
+                    _atualiza_progresso("gravando batch final", force=True)
                     _flush(batch)
-                _atualiza_progresso("finalizando")
+                _atualiza_progresso("finalizando", force=True)
         finally:
             try:
                 os.remove(tmp_path)

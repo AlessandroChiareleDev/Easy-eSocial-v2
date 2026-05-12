@@ -406,8 +406,7 @@ const gruposPorMes = computed<GrupoMes[]>(() => {
 // entao no fim do loop o mes inteiro esta com chain walk unificado.
 async function disparaExtracaoLote(g: GrupoMes) {
   const alvos = g.zips.filter(
-    (z) =>
-      z.extracao_status === "pendente" || z.extracao_status === "erro",
+    (z) => z.extracao_status === "pendente" || z.extracao_status === "erro",
   );
   if (alvos.length === 0) {
     window.alert("Nenhum ZIP pendente/erro neste mês. Tudo já indexado.");
@@ -549,8 +548,7 @@ const selecaoCount = computed(() => selecionados.value.size);
               @click="disparaExtracaoLote(g)"
               :title="'Extrai todos os ZIPs pendentes/erro deste mês em sequência. Chain walk consolidado no fim.'"
             >
-              ⚡ Extrair tudo deste mês
-              ({{ g.pendentes + g.erros }})
+              ⚡ Extrair tudo deste mês ({{ g.pendentes + g.erros }})
             </button>
           </div>
         </header>
@@ -579,105 +577,107 @@ const selecaoCount = computed(() => selecionados.value.size);
               <span class="badge" :class="statusLabel(z.extracao_status).cls">
                 {{ statusLabel(z.extracao_status).label }}
               </span>
-        </div>
+            </div>
 
-        <div class="zc-name" :title="z.nome_arquivo_original">
-          {{ z.nome_arquivo_original }}
-        </div>
+            <div class="zc-name" :title="z.nome_arquivo_original">
+              {{ z.nome_arquivo_original }}
+            </div>
 
-        <div class="zc-meta">
-          <div>
-            <span class="lbl">Tamanho</span>
-            <span class="val mono">{{ formatBytes(z.tamanho_bytes) }}</span>
-          </div>
-          <div>
-            <span class="lbl">XMLs</span>
-            <span class="val mono accent">{{ z.total_xmls ?? "—" }}</span>
-          </div>
-          <div>
-            <span class="lbl">PerApur</span>
-            <span class="val mono">{{ z.perapur_dominante ?? "—" }}</span>
-          </div>
-          <div>
-            <span class="lbl">Enviado</span>
-            <span class="val mono">{{ fmtData(z.enviado_em) }}</span>
-          </div>
-        </div>
+            <div class="zc-meta">
+              <div>
+                <span class="lbl">Tamanho</span>
+                <span class="val mono">{{ formatBytes(z.tamanho_bytes) }}</span>
+              </div>
+              <div>
+                <span class="lbl">XMLs</span>
+                <span class="val mono accent">{{ z.total_xmls ?? "—" }}</span>
+              </div>
+              <div>
+                <span class="lbl">PerApur</span>
+                <span class="val mono">{{ z.perapur_dominante ?? "—" }}</span>
+              </div>
+              <div>
+                <span class="lbl">Enviado</span>
+                <span class="val mono">{{ fmtData(z.enviado_em) }}</span>
+              </div>
+            </div>
 
-        <div
-          v-if="z.extracao_status === 'erro' && z.extracao_erro"
-          class="err-msg"
-        >
-          ⚠ {{ z.extracao_erro }}
-        </div>
-        <div v-if="extracaoErro.get(z.id)" class="err-msg">
-          ⚠ {{ extracaoErro.get(z.id) }}
-        </div>
+            <div
+              v-if="z.extracao_status === 'erro' && z.extracao_erro"
+              class="err-msg"
+            >
+              ⚠ {{ z.extracao_erro }}
+            </div>
+            <div v-if="extracaoErro.get(z.id)" class="err-msg">
+              ⚠ {{ extracaoErro.get(z.id) }}
+            </div>
 
-        <div class="zc-actions">
-          <button
-            v-if="
-              z.extracao_status === 'pendente' || z.extracao_status === 'erro'
-            "
-            class="btn-primary"
-            :disabled="extraindo.has(z.id)"
-            @click="disparaExtracao(z)"
-          >
-            {{
-              extraindo.has(z.id)
-                ? "… extraindo (pode demorar)"
-                : "⚡ Extrair agora"
-            }}
-          </button>
-          <button
-            v-else-if="z.extracao_status === 'extraindo'"
-            class="btn-primary"
-            disabled
-          >
-            … extraindo…
-          </button>
-          <button
-            v-else
-            class="btn-primary"
-            :disabled="z.extracao_status !== 'ok'"
-            @click="emit('visualizar', z)"
-          >
-            🔍 Visualizar eventos
-          </button>
-          <a class="btn-ghost" :href="urlDownloadZip(z.id)" download>
-            ⬇ Baixar zip
-          </a>
-          <button
-            v-if="z.extracao_status === 'erro'"
-            class="btn-ghost btn-reupload"
-            :disabled="reuploadAndamento.has(z.id)"
-            @click="disparaReupload(z)"
-            :title="'Re-envia o mesmo ZIP para recuperar o card (substitui o Large Object perdido).'"
-          >
-            <template v-if="reuploadAndamento.has(z.id)">
-              📤 enviando… {{ Math.floor(reuploadAndamento.get(z.id) ?? 0) }}%
-            </template>
-            <template v-else>📤 Re-upload do ZIP</template>
-          </button>
-          <button
-            v-if="z.extracao_status === 'ok'"
-            class="btn-ghost"
-            :disabled="extraindo.has(z.id) || batchRodando"
-            @click="disparaReextrairS5002(z)"
-            :title="'Reextrai apenas S-5002 (não toca S-1210). Útil para mês já enviado.'"
-          >
-            {{ extraindo.has(z.id) ? "… re-extraindo" : "🔄 Só S-5002" }}
-          </button>
-          <button
-            class="btn-danger"
-            :disabled="excluindo.has(z.id)"
-            @click="disparaExclusao(z)"
-            :title="'Excluir zip e eventos indexados'"
-          >
-            {{ excluindo.has(z.id) ? "… excluindo" : "🗑 Excluir" }}
-          </button>
-        </div>
-      </div>
+            <div class="zc-actions">
+              <button
+                v-if="
+                  z.extracao_status === 'pendente' ||
+                  z.extracao_status === 'erro'
+                "
+                class="btn-primary"
+                :disabled="extraindo.has(z.id)"
+                @click="disparaExtracao(z)"
+              >
+                {{
+                  extraindo.has(z.id)
+                    ? "… extraindo (pode demorar)"
+                    : "⚡ Extrair agora"
+                }}
+              </button>
+              <button
+                v-else-if="z.extracao_status === 'extraindo'"
+                class="btn-primary"
+                disabled
+              >
+                … extraindo…
+              </button>
+              <button
+                v-else
+                class="btn-primary"
+                :disabled="z.extracao_status !== 'ok'"
+                @click="emit('visualizar', z)"
+              >
+                🔍 Visualizar eventos
+              </button>
+              <a class="btn-ghost" :href="urlDownloadZip(z.id)" download>
+                ⬇ Baixar zip
+              </a>
+              <button
+                v-if="z.extracao_status === 'erro'"
+                class="btn-ghost btn-reupload"
+                :disabled="reuploadAndamento.has(z.id)"
+                @click="disparaReupload(z)"
+                :title="'Re-envia o mesmo ZIP para recuperar o card (substitui o Large Object perdido).'"
+              >
+                <template v-if="reuploadAndamento.has(z.id)">
+                  📤 enviando…
+                  {{ Math.floor(reuploadAndamento.get(z.id) ?? 0) }}%
+                </template>
+                <template v-else>📤 Re-upload do ZIP</template>
+              </button>
+              <button
+                v-if="z.extracao_status === 'ok'"
+                class="btn-ghost"
+                :disabled="extraindo.has(z.id) || batchRodando"
+                @click="disparaReextrairS5002(z)"
+                :title="'Reextrai apenas S-5002 (não toca S-1210). Útil para mês já enviado.'"
+              >
+                {{ extraindo.has(z.id) ? "… re-extraindo" : "🔄 Só S-5002" }}
+              </button>
+              <button
+                class="btn-danger"
+                :disabled="excluindo.has(z.id)"
+                @click="disparaExclusao(z)"
+                :title="'Excluir zip e eventos indexados'"
+              >
+                {{ excluindo.has(z.id) ? "… excluindo" : "🗑 Excluir" }}
+              </button>
+            </div>
+          </div>
         </div>
       </section>
     </div>

@@ -130,9 +130,13 @@ async function uploadUm(f: File): Promise<void> {
   progress.value = null;
   peakRate.value = 0;
 
+  // Captura o empresaId no momento do upload e usa o MESMO valor no extrair.
+  // Evita race se o usuario trocar de empresa enquanto sobe.
+  const empresaIdSnapshot = props.empresaId;
+
   const h = uploadZip({
     file: f,
-    empresaId: props.empresaId,
+    empresaId: empresaIdSnapshot,
     dtIni: dtIni.value,
     dtFim: dtFim.value,
     onProgress: (p) => {
@@ -163,8 +167,9 @@ async function uploadUm(f: File): Promise<void> {
 
     phase.value = "extraindo";
     // Usa extrairZip do exploradorApi (injeta Authorization Bearer + X-Empresa-CNPJ).
+    // Usa o MESMO empresaId capturado no upload pra garantir consistencia de tenant.
     const extractStats = await extrairZip(res.zip_id, {
-      empresaId: props.empresaId,
+      empresaId: empresaIdSnapshot,
     });
     const det = await detalheZip(res.zip_id);
     emit("uploaded", det.zip);
@@ -282,7 +287,8 @@ const totaisAgregados = computed(() => {
     duplicados += r.duplicados_id_evento ?? 0;
   }
   return { totalXmls, indexados, duplicados };
-});</script>
+});
+</script>
 
 <template>
   <div class="uploader liquid-glass">
@@ -324,7 +330,9 @@ const totaisAgregados = computed(() => {
           <div class="dz-files-head">
             <div class="dz-icon ok">📦</div>
             <div class="dz-files-title">
-              {{ files.length }} arquivo{{ files.length === 1 ? "" : "s" }}
+              {{ files.length }} arquivo{{
+                files.length === 1 ? "" : "s"
+              }}
               selecionado{{ files.length === 1 ? "" : "s" }}
               <span class="dz-files-bytes mono"
                 >· {{ formatBytes(totalBytesSelecionados) }}</span
@@ -333,9 +341,7 @@ const totaisAgregados = computed(() => {
             <button class="btn-primary btn-sm" @click.stop="pickFile">
               + Adicionar mais
             </button>
-            <button class="btn-ghost btn-sm" @click.stop="reset">
-              limpar
-            </button>
+            <button class="btn-ghost btn-sm" @click.stop="reset">limpar</button>
           </div>
           <ul class="dz-files-ul">
             <li
@@ -356,8 +362,8 @@ const totaisAgregados = computed(() => {
           </ul>
           <div class="dz-hint">
             💡 Pode clicar em <strong>+ Adicionar mais</strong>, arrastar outros
-            ZIPs aqui, ou segurar <kbd>Ctrl</kbd> ao selecionar pra pegar
-            vários de uma vez.
+            ZIPs aqui, ou segurar <kbd>Ctrl</kbd> ao selecionar pra pegar vários
+            de uma vez.
           </div>
         </div>
       </div>
@@ -476,16 +482,19 @@ const totaisAgregados = computed(() => {
         <!-- Resumo agregado de duplicados detectados e resolvidos -->
         <div v-if="totaisAgregados.totalXmls > 0" class="dedup-resumo">
           <div class="dedup-line">
-            📦 <strong>{{ totaisAgregados.totalXmls.toLocaleString() }}</strong>
-            XMLs lidos ·
-            ✅ <strong class="ok">{{
+            📦
+            <strong>{{ totaisAgregados.totalXmls.toLocaleString() }}</strong>
+            XMLs lidos · ✅
+            <strong class="ok">{{
               totaisAgregados.indexados.toLocaleString()
-            }}</strong> indexados
+            }}</strong>
+            indexados
             <span v-if="totaisAgregados.duplicados > 0">
-              ·
-              ♻ <strong class="warn">{{
+              · ♻
+              <strong class="warn">{{
                 totaisAgregados.duplicados.toLocaleString()
-              }}</strong> duplicados detectados
+              }}</strong>
+              duplicados detectados
             </span>
           </div>
           <div v-if="totaisAgregados.duplicados > 0" class="dedup-info">
@@ -512,7 +521,10 @@ const totaisAgregados = computed(() => {
             >
               ♻ {{ r.duplicados_id_evento }} dup
             </span>
-            <span v-else-if="r.ok && r.indexados !== undefined" class="r-tag ok">
+            <span
+              v-else-if="r.ok && r.indexados !== undefined"
+              class="r-tag ok"
+            >
               {{ r.indexados }} XMLs
             </span>
             <span v-if="!r.ok" class="r-erro">{{ r.erro }}</span>

@@ -27,12 +27,20 @@ router = APIRouter(prefix="/api/explorador", tags=["explorador"])
 # ---------------------------------------------------------------------------
 
 _SEQ_RE = re.compile(r"(\d{6,})")  # captura sequencial numérico do nome
+_EVENTO_ENTRY_RE = re.compile(r"\.(S-\d{4})\.xml$", re.IGNORECASE)
 
 
 def _extrair_sequencial(filename: str) -> str | None:
     """Tenta extrair sequencial numérico do nome do arquivo zip."""
     m = _SEQ_RE.search(filename)
     return m.group(1) if m else None
+
+
+def _tipo_evento_por_nome_entry(filename: str) -> str | None:
+    """Extrai o tipo eSocial do nome do XML dentro do ZIP: ID....S-1210.xml."""
+    base = filename.rsplit("/", 1)[-1]
+    m = _EVENTO_ENTRY_RE.search(base)
+    return m.group(1).upper() if m else None
 
 
 def _ensure_empresa(empresa_id: int) -> dict:
@@ -763,6 +771,9 @@ def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False, empresa_id: int 
                         if evt is None:
                             falhas += 1
                             continue
+                        tipo_por_nome = _tipo_evento_por_nome_entry(name)
+                        if tipo_por_nome:
+                            evt.tipo_evento = tipo_por_nome
                         if somente_s5002 and evt.tipo_evento != "S-5002":
                             continue
                         if evt.per_apur:

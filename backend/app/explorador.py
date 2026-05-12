@@ -974,7 +974,7 @@ def _extracao_worker(zip_id: int, somente_s5002: bool, empresa_id: int) -> None:
         print(f"[extracao_worker] zip {zip_id} falhou: {e}")
         # _extrair_zip_sync ja marca status='erro' no banco, mas garante:
         try:
-            with db.cursor(empresa_id=empresa_id) as c:
+            with db.cursor(empresa_id=empresa_id, commit=True) as c:
                 c.execute(
                     "UPDATE empresa_zips_brutos SET extracao_status='erro', extracao_erro=%s WHERE id=%s",
                     (str(e)[:1000], zip_id),

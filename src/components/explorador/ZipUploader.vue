@@ -3,6 +3,7 @@ import { ref, computed, onUnmounted } from "vue";
 import {
   uploadZip,
   detalheZip,
+  extrairZip,
   formatBytes,
   formatRate,
   formatSeconds,
@@ -161,24 +162,19 @@ async function uploadUm(f: File): Promise<void> {
     }
 
     phase.value = "extraindo";
-    const r = await fetch(`/api/explorador/zips/${res.zip_id}/extrair`, {
-      method: "POST",
+    // Usa extrairZip do exploradorApi (injeta Authorization Bearer + X-Empresa-CNPJ).
+    const extractStats = await extrairZip(res.zip_id, {
+      empresaId: props.empresaId,
     });
-    if (!r.ok) {
-      const txt = await r.text().catch(() => "");
-      throw new Error(`extração: HTTP ${r.status} ${txt.slice(0, 200)}`);
-    }
-    // Le estatisticas do extrair (total_xmls, indexados, duplicados_id_evento)
-    const extractStats = await r.json().catch(() => ({}));
     const det = await detalheZip(res.zip_id);
     emit("uploaded", det.zip);
     resultados.value.push({
       nome: f.name,
       ok: true,
       zip_id: res.zip_id,
-      total_xmls: extractStats?.total_xmls,
-      indexados: extractStats?.indexados,
-      duplicados_id_evento: extractStats?.duplicados_id_evento,
+      total_xmls: extractStats.total_xmls,
+      indexados: extractStats.indexados,
+      duplicados_id_evento: extractStats.duplicados_id_evento,
     });
   } catch (e) {
     handle.value = null;

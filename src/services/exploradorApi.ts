@@ -761,6 +761,50 @@ export function urlXmlCpf(
   )}/${cpf}?empresa_id=${empresaId}&tipo=${tipo}`;
 }
 
+function filenameFromContentDisposition(value: string | null): string | null {
+  if (!value) return null;
+  const utf8 = value.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  if (utf8) return decodeURIComponent(utf8.replace(/"/g, ""));
+  const plain = value.match(/filename="?([^";]+)"?/i)?.[1];
+  return plain || null;
+}
+
+export async function downloadXmlCpf(
+  loteNum: number,
+  perApur: string,
+  cpf: string,
+  empresaId: number,
+  tipo: "S-1210" | "S-5002" = "S-1210",
+): Promise<void> {
+  const path = urlXmlCpf(loteNum, perApur, cpf, empresaId, tipo);
+  const response = await fetch(`${BASE}${path}`, { headers: authHeaders() });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    let detail = text;
+    try {
+      detail = JSON.parse(text)?.detail || text;
+    } catch {
+      // mantém resposta textual
+    }
+    throw Object.assign(new Error(detail || `HTTP ${response.status}`), {
+      status: response.status,
+    });
+  }
+
+  const blob = await response.blob();
+  const filename =
+    filenameFromContentDisposition(response.headers.get("content-disposition")) ||
+    `${tipo}_${cpf}_${perApur}.xml`;
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(objectUrl);
+}
+
 export async function cadeiaCpf(args: {
   empresaId: number;
   cpf: string;

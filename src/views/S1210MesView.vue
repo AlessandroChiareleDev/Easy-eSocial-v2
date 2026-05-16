@@ -2,9 +2,9 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import {
+  downloadXmlCpf,
   s1210CpfsDoMes,
   s1210DetalheCpf,
-  urlXmlCpf,
   type DetalheCpf,
 } from "@/services/exploradorApi";
 import { useEmpresaStore } from "@/stores/empresa";
@@ -202,15 +202,19 @@ function abrirDetalheDoErro() {
   void abrirDetalhe(r);
 }
 
-function baixarXml(r: CpfRow) {
-  const url = urlXmlCpf(
-    r.lote_num,
-    props.per_apur,
-    r.cpf,
-    empresaId.value,
-    "S-1210",
-  );
-  window.open(url, "_blank");
+async function baixarXml(r: CpfRow) {
+  error.value = null;
+  try {
+    await downloadXmlCpf(
+      r.lote_num,
+      props.per_apur,
+      r.cpf,
+      empresaId.value,
+      "S-1210",
+    );
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "Falha ao baixar XML";
+  }
 }
 
 async function carregar() {
@@ -289,16 +293,20 @@ function fmtData(s: string | null | undefined): string {
     return s;
   }
 }
-function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
+async function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
   if (!detalhe.value) return;
-  const url = urlXmlCpf(
-    detalhe.value.lote_num,
-    detalhe.value.per_apur,
-    detalhe.value.cpf,
-    empresaId.value,
-    tipo,
-  );
-  window.open(url, "_blank");
+  erroDetalhe.value = "";
+  try {
+    await downloadXmlCpf(
+      detalhe.value.lote_num,
+      detalhe.value.per_apur,
+      detalhe.value.cpf,
+      empresaId.value,
+      tipo,
+    );
+  } catch (e) {
+    erroDetalhe.value = e instanceof Error ? e.message : "Falha ao baixar XML";
+  }
 }
 </script>
 

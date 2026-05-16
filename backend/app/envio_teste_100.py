@@ -28,7 +28,7 @@ from typing import Any
 
 import psycopg2.extras
 
-from . import db, esocial_client, storage
+from . import db, esocial_client, storage, tenant
 from .xml_diff import eventos_iguais
 from .xml_extractor import extrair_s1210
 from .xml_s1210 import S1210XMLGenerator
@@ -43,6 +43,7 @@ POLL_INTERVALO_S = 8
 
 def _carregar_eventos_alvo(conn, empresa_id: int, per_apur: str, limite: int,
                            pular_ja_tentados: bool = False) -> list[dict]:
+    internal_empresa_id = tenant.internal_empresa_id(empresa_id)
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as c:
         if pular_ja_tentados:
             c.execute(
@@ -50,14 +51,14 @@ def _carregar_eventos_alvo(conn, empresa_id: int, per_apur: str, limite: int,
                 SELECT * FROM (
                   SELECT DISTINCT ON (ev.cpf)
                          ev.id, ev.cpf, ev.nr_recibo, ev.id_evento,
-                         ev.xml_oid, ev.xml_size_bytes
+                        ev.xml_oid, ev.xml_bytes, ev.xml_size_bytes
                     FROM explorador_eventos ev
                     JOIN empresa_zips_brutos z ON z.id=ev.zip_id
                    WHERE z.empresa_id=%s
                      AND ev.tipo_evento='S-1210'
                      AND ev.per_apur=%s
                      AND ev.retificado_por_id IS NULL
-                     AND ev.xml_oid IS NOT NULL
+                     AND (ev.xml_oid IS NOT NULL OR ev.xml_bytes IS NOT NULL)
                      AND NOT EXISTS (
                            SELECT 1
                              FROM timeline_envio_item it
@@ -67,12 +68,31 @@ def _carregar_eventos_alvo(conn, empresa_id: int, per_apur: str, limite: int,
                               AND tm.per_apur=%s
                               AND it.tipo_evento='S-1210'
                               AND it.cpf=ev.cpf
+                                                                AND NOT (
+                                                                    it.status = 'falha_rede'
+                                                                OR (
+                                                                    it.status LIKE 'erro%%'
+                                                                AND it.erro_codigo = '401'
+                                                                AND (
+                                                                            it.erro_mensagem ILIKE '%%620:%%'
+                                                                     OR it.erro_mensagem ILIKE '%%folha de pagamento%%fechada%%'
+                                                                )
+                                                                AND EXISTS (
+                                                                            SELECT 1
+                                                                                FROM explorador_eventos r
+                                                                             WHERE r.tipo_evento='S-1298'
+                                                                                 AND r.cd_resposta='201'
+                                                                                 AND r.per_apur=%s
+                                                                                 AND r.dt_processamento >= it.criado_em
+                                                                )
+                                                                )
+                                                            )
                          )
                    ORDER BY ev.cpf ASC, ev.dt_processamento DESC NULLS LAST, ev.id DESC
                 ) sub
                 LIMIT %s
                 """,
-                (empresa_id, per_apur, empresa_id, per_apur, limite),
+                                (internal_empresa_id, per_apur, internal_empresa_id, per_apur, per_apur, limite),
             )
         else:
             c.execute(
@@ -80,19 +100,19 @@ def _carregar_eventos_alvo(conn, empresa_id: int, per_apur: str, limite: int,
                 SELECT * FROM (
                   SELECT DISTINCT ON (ev.cpf)
                          ev.id, ev.cpf, ev.nr_recibo, ev.id_evento,
-                         ev.xml_oid, ev.xml_size_bytes
+                        ev.xml_oid, ev.xml_bytes, ev.xml_size_bytes
                     FROM explorador_eventos ev
                     JOIN empresa_zips_brutos z ON z.id=ev.zip_id
                    WHERE z.empresa_id=%s
                      AND ev.tipo_evento='S-1210'
                      AND ev.per_apur=%s
                      AND ev.retificado_por_id IS NULL
-                     AND ev.xml_oid IS NOT NULL
+                     AND (ev.xml_oid IS NOT NULL OR ev.xml_bytes IS NOT NULL)
                    ORDER BY ev.cpf ASC, ev.dt_processamento DESC NULLS LAST, ev.id DESC
                 ) sub
                 LIMIT %s
                 """,
-                (empresa_id, per_apur, limite),
+                (internal_empresa_id, per_apur, limite),
             )
         return list(c.fetchall())
 
@@ -105,12 +125,23 @@ def _ler_xml_lo(conn_lo, oid: int) -> bytes:
         lo.close()
 
 
+def _ler_xml_evento(conn_lo, ev: dict) -> bytes:
+    xml_bytes = ev.get("xml_bytes")
+    if xml_bytes is not None:
+        return bytes(xml_bytes)
+    xml_oid = ev.get("xml_oid")
+    if xml_oid is None:
+        raise ValueError(f"evento {ev.get('id')} sem xml_bytes/xml_oid")
+    return _ler_xml_lo(conn_lo, int(xml_oid))
+
+
 def _criar_timeline_envio(conn, empresa_id: int, per_apur: str, total: int) -> tuple[int, int]:
     """Garante timeline_mes e cria timeline_envio v1. Retorna (envio_id, mes_id)."""
+    internal_empresa_id = tenant.internal_empresa_id(empresa_id)
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as c:
         c.execute(
             "SELECT id FROM timeline_mes WHERE empresa_id=%s AND per_apur=%s",
-            (empresa_id, per_apur),
+            (internal_empresa_id, per_apur),
         )
         m = c.fetchone()
         if not m:
@@ -271,7 +302,7 @@ def _processar_lote(
 
     for seq, (item_id, ev) in enumerate(zip(items, eventos), start=1):
         try:
-            xml_antigo = _ler_xml_lo(conn_lo, int(ev["xml_oid"]))
+            xml_antigo = _ler_xml_evento(conn_lo, ev)
             campos = extrair_s1210(xml_antigo)
         except Exception as e:  # noqa: BLE001
             falhas_prep.append((item_id, "extrair_xml", f"{type(e).__name__}: {e}"))
@@ -502,9 +533,9 @@ def rodar(
     ambiente: str,
     pular_ja_tentados: bool = False,
 ) -> dict:
-    conn_db = db.connect()
-    conn_lo = db.connect()
-    conn_w = db.connect()
+    conn_db = db.connect(empresa_id=empresa_id)
+    conn_lo = db.connect(empresa_id=empresa_id)
+    conn_w = db.connect(empresa_id=empresa_id)
     try:
         eventos = _carregar_eventos_alvo(conn_db, empresa_id, per_apur, limite, pular_ja_tentados=pular_ja_tentados)
         if not eventos:

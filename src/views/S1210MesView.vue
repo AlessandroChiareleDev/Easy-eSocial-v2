@@ -144,6 +144,64 @@ function classeStatus(s: string): string {
   }
 }
 
+const erroSelecionado = ref<CpfRow | null>(null);
+
+function abrirErro(r: CpfRow) {
+  erroSelecionado.value = r;
+}
+
+function fecharErro() {
+  erroSelecionado.value = null;
+}
+
+function erroCodigo(r: CpfRow | null): string {
+  return r?.erro_codigo || "sem codigo";
+}
+
+function erroMensagemPrincipal(r: CpfRow | null): string {
+  if (!r) return "";
+  return (
+    r.descricao_resposta ||
+    r.erro_descricao ||
+    "O retorno salvo para este CPF nao trouxe uma mensagem detalhada do eSocial."
+  );
+}
+
+function erroInterpretacao(r: CpfRow | null): string {
+  const cod = r?.erro_codigo;
+  if (cod === "401" || cod === "459") {
+    return "O recibo usado no envio nao e mais aceito como referencia pelo eSocial. Normalmente isso acontece quando o evento anterior foi retificado fora deste lote, entao o recibo local ficou desatualizado.";
+  }
+  if (cod === "202") {
+    return "O eSocial aceitou o evento com advertencia. A mensagem precisa ser conferida, mas este retorno costuma indicar aviso funcional, nao falha tecnica de transmissao.";
+  }
+  if (r?.status === "erro") {
+    return "O eSocial rejeitou ou sinalizou problema neste CPF. A decisao de reenviar depende do codigo e da mensagem bruta abaixo.";
+  }
+  return "Este CPF nao esta marcado como erro no estado atual.";
+}
+
+function erroAcaoRecomendada(r: CpfRow | null): string {
+  const cod = r?.erro_codigo;
+  if (cod === "401" || cod === "459") {
+    return "Baixar um ZIP novo do eSocial para o periodo, reextrair os eventos no Explorador e so depois retentar o envio deste CPF/lote com o recibo atualizado.";
+  }
+  if (cod === "202") {
+    return "Conferir o aviso e o recibo retornado. Se ha recibo novo/aceite, nao reenvie automaticamente so por causa do aviso.";
+  }
+  if (!r?.erro_codigo && r?.status === "erro") {
+    return "Abrir o detalhamento completo do CPF e conferir historico/XML; se for falha tecnica sem recibo, retentar depois da causa tecnica estar resolvida.";
+  }
+  return "Abrir o detalhamento completo para conferir historico, recibos usados e XMLs relacionados.";
+}
+
+function abrirDetalheDoErro() {
+  const r = erroSelecionado.value;
+  if (!r) return;
+  fecharErro();
+  void abrirDetalhe(r);
+}
+
 function baixarXml(cpf: string) {
   const url = `/py-api/api/s1210-repo/xml-cpf?per_apur=${encodeURIComponent(props.per_apur)}&cpf=${cpf}&empresa_id=${empresaId.value}`;
   // window.open dispara download via Content-Disposition
@@ -345,7 +403,7 @@ function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
           placeholder="Filtrar por CPF…"
           class="inp"
         />
-        <select v-model="filtroStatus" class="inp">
+        <select v-model="filtroStatus" class="inp status-select">
           <option value="todos">Todos os status</option>
           <option value="pendente">Pendente</option>
           <option value="ok">OK</option>
@@ -382,19 +440,37 @@ function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
               <td class="mono">{{ fmtCpf(r.cpf) }}</td>
               <td>{{ r.nome || "—" }}</td>
               <td>
-                <span :class="classeStatus(r.status)">{{ r.status }}</span>
-                <span
+                <button
+                  v-if="r.status === 'erro'"
+                  type="button"
+                  :class="classeStatus(r.status)"
+                  class="pill-btn"
+                  title="Ver explicacao completa deste erro"
+                  @click.stop="abrirErro(r)"
+                >
+                  {{ r.status }}
+                </button>
+                <span v-else :class="classeStatus(r.status)">{{
+                  r.status
+                }}</span>
+                <button
                   v-if="flagDoCpf(r) === 'recibo_retificado'"
                   class="flag flag--retif"
+                  type="button"
                   :title="`Codigo ${r.erro_codigo}: recibo retificado externamente. Reextrair recibos via ZIP novo.`"
-                  >🔁 retif</span
+                  @click.stop="abrirErro(r)"
                 >
-                <span
+                  🔁 retif
+                </button>
+                <button
                   v-else-if="flagDoCpf(r) === 'aceito_com_aviso'"
                   class="flag flag--aviso"
+                  type="button"
                   :title="`Codigo 202: aceito pelo eSocial com advertencia.`"
-                  >⚠ aviso</span
+                  @click.stop="abrirErro(r)"
                 >
+                  ⚠ aviso
+                </button>
               </td>
               <td class="mono small">{{ r.nr_recibo_xml || "—" }}</td>
               <td class="mono small">{{ r.nr_recibo_usado || "—" }}</td>
@@ -431,6 +507,87 @@ function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
         </table>
       </div>
     </section>
+
+    <!-- ═══════ MODAL EXPLICACAO DO ERRO ═══════ -->
+    <div v-if="erroSelecionado" class="modal-bg" @click.self="fecharErro">
+      <div class="modal modal--erro" role="dialog" aria-modal="true">
+        <header class="modal-head modal-head--erro">
+          <div>
+            <div class="modal-kicker">Erro do envio · S-1210</div>
+            <h2>
+              {{ fmtCpf(erroSelecionado.cpf) }}
+              <span class="head-nome"
+                >· código {{ erroCodigo(erroSelecionado) }}</span
+              >
+            </h2>
+          </div>
+          <button class="fechar" @click="fecharErro">×</button>
+        </header>
+
+        <div class="modal-body erro-body">
+          <section class="erro-hero">
+            <span :class="classeStatus(erroSelecionado.status)">{{
+              erroSelecionado.status
+            }}</span>
+            <div>
+              <div class="erro-title">
+                {{ erroMensagemPrincipal(erroSelecionado) }}
+              </div>
+              <div class="erro-sub">
+                {{ tituloMes }} · Lote {{ erroSelecionado.lote_num }} · enviado
+                em
+                {{ fmtData(erroSelecionado.enviado_em) }}
+              </div>
+            </div>
+          </section>
+
+          <section class="erro-grid">
+            <div class="erro-card">
+              <h3>O que significa</h3>
+              <p>{{ erroInterpretacao(erroSelecionado) }}</p>
+            </div>
+            <div class="erro-card erro-card--acao">
+              <h3>Próxima ação</h3>
+              <p>{{ erroAcaoRecomendada(erroSelecionado) }}</p>
+            </div>
+          </section>
+
+          <dl class="det-kv det-kv--small erro-kv">
+            <dt>CPF</dt>
+            <dd class="mono">{{ fmtCpf(erroSelecionado.cpf) }}</dd>
+            <dt>Nome</dt>
+            <dd>{{ erroSelecionado.nome || "—" }}</dd>
+            <dt>Recibo do XML</dt>
+            <dd class="mono small">
+              {{ erroSelecionado.nr_recibo_xml || "—" }}
+            </dd>
+            <dt>Recibo usado</dt>
+            <dd class="mono small">
+              {{ erroSelecionado.nr_recibo_usado || "—" }}
+            </dd>
+            <dt>Código eSocial</dt>
+            <dd>{{ erroCodigo(erroSelecionado) }}</dd>
+            <dt>Resposta eSocial</dt>
+            <dd>{{ erroSelecionado.descricao_resposta || "—" }}</dd>
+            <dt>Erro técnico/local</dt>
+            <dd>{{ erroSelecionado.erro_descricao || "—" }}</dd>
+          </dl>
+
+          <div class="erro-actions">
+            <button class="btn-secondary" @click="abrirDetalheDoErro">
+              Ver detalhamento completo
+            </button>
+            <button
+              class="btn-xml"
+              :disabled="!PODE_BAIXAR_XML || !erroSelecionado.tem_xml"
+              @click="baixarXml(erroSelecionado.cpf)"
+            >
+              ⬇ XML
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!-- ═══════ MODAL DETALHE DO CPF ═══════ -->
     <div
@@ -913,6 +1070,21 @@ function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
   outline: none;
   border-color: rgba(108, 240, 160, 0.5);
 }
+.status-select {
+  min-width: 176px;
+  background-color: #1a1f2b;
+  color: #e8edf5;
+  color-scheme: dark;
+  cursor: pointer;
+}
+.status-select option {
+  background-color: #111827;
+  color: #e8edf5;
+}
+.status-select option:checked {
+  background-color: #2563eb;
+  color: #fff;
+}
 .muted {
   opacity: 0.6;
   font-size: 12px;
@@ -993,6 +1165,18 @@ function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
   background: rgba(160, 160, 160, 0.15);
   color: #c0c0c0;
 }
+.pill-btn {
+  border: 0;
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1.25;
+}
+.pill-btn:hover,
+.pill-btn:focus-visible {
+  filter: brightness(1.18);
+  box-shadow: 0 0 0 2px rgba(255, 144, 144, 0.24);
+  outline: none;
+}
 
 .btn-xml {
   background: rgba(108, 240, 160, 0.12);
@@ -1026,6 +1210,15 @@ function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
   letter-spacing: 0.04em;
   vertical-align: middle;
   cursor: help;
+}
+button.flag {
+  font-family: inherit;
+  cursor: pointer;
+}
+button.flag:hover,
+button.flag:focus-visible {
+  filter: brightness(1.16);
+  outline: none;
 }
 .flag--retif {
   background: rgba(255, 130, 80, 0.18);
@@ -1106,6 +1299,9 @@ function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
 .modal--lg {
   max-width: 1080px;
 }
+.modal--erro {
+  max-width: 760px;
+}
 .modal-head {
   display: flex;
   align-items: flex-start;
@@ -1113,6 +1309,14 @@ function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
   gap: 1rem;
   padding: 1.1rem 1.4rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+.modal-head--erro {
+  border-bottom-color: rgba(255, 130, 130, 0.18);
+  background: linear-gradient(
+    180deg,
+    rgba(120, 44, 44, 0.24),
+    rgba(18, 24, 38, 0)
+  );
 }
 .modal-kicker {
   font-size: 0.72rem;
@@ -1147,6 +1351,86 @@ function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
 .modal-body {
   padding: 1rem 1.4rem 1.4rem;
   overflow-y: auto;
+}
+.erro-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+.erro-hero {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.8rem;
+  padding: 0.85rem 1rem;
+  background: rgba(255, 110, 110, 0.08);
+  border: 1px solid rgba(255, 110, 110, 0.22);
+  border-radius: 10px;
+}
+.erro-title {
+  color: #ffe1e1;
+  font-weight: 650;
+  line-height: 1.35;
+}
+.erro-sub {
+  margin-top: 0.25rem;
+  color: #a7b1c2;
+  font-size: 0.78rem;
+}
+.erro-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+.erro-card {
+  padding: 0.85rem 1rem;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+}
+.erro-card--acao {
+  background: rgba(255, 170, 80, 0.06);
+  border-color: rgba(255, 170, 80, 0.22);
+}
+.erro-card h3 {
+  margin: 0 0 0.45rem;
+  color: #eef3fa;
+  font-size: 0.88rem;
+}
+.erro-card p {
+  margin: 0;
+  color: #cbd5e1;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+.erro-kv {
+  padding: 0.85rem 1rem;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+}
+.erro-kv dd {
+  overflow-wrap: anywhere;
+}
+.erro-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #e6edf7;
+  padding: 0.45rem 0.8rem;
+  border-radius: 7px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-secondary:hover,
+.btn-secondary:focus-visible {
+  background: rgba(255, 255, 255, 0.12);
+  outline: none;
 }
 .det-state {
   padding: 2rem;
@@ -1407,5 +1691,14 @@ function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
   display: flex;
   gap: 0.6rem;
   flex-wrap: wrap;
+}
+
+@media (max-width: 760px) {
+  .erro-grid {
+    grid-template-columns: 1fr;
+  }
+  .erro-hero {
+    flex-direction: column;
+  }
 }
 </style>

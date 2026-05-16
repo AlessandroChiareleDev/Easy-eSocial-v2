@@ -290,7 +290,11 @@ async function uploadUm(f: File): Promise<void> {
           const marco = Math.floor(p.percent / 10) * 10;
           if (marco > lastPctLogado && p.total > 0) {
             lastPctLogado = marco;
-            log("info", `⚙ ${p.processados}/${p.total} (${p.percent}%)`, f.name);
+            log(
+              "info",
+              `⚙ ${p.processados}/${p.total} (${p.percent}%)`,
+              f.name,
+            );
           }
           if (p.status === "ok") {
             window.clearInterval(pollId);

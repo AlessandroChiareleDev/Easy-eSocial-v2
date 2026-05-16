@@ -45,6 +45,7 @@ EVENTO_PATTERNS = {
     "evtInfoEmpregador": "S-1000",
     "evtFechaEvPer": "S-1299",
     "evtAbreEvPer": "S-1298",
+    "evtReabreEvPer": "S-1298",
     "evtExclusao": "S-3000",
     "evtBenIn": "S-2405",
 }

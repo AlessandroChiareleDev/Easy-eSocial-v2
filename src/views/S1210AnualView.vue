@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { s1210AnualOverview } from "@/services/exploradorApi";
 
@@ -64,8 +64,15 @@ const empresaId = computed<number>(() => empresaStore.currentId ?? 1);
 const overview = ref<OverviewAnual | null>(null);
 const loading = ref(true);
 const error = ref<string | null>(null);
+const lastSyncedAt = ref<Date | null>(null);
+const isAutoRefreshing = ref(false);
+const lembretesMes = ref<Record<string, string[]>>({});
+const lembreteModalMes = ref<MesLinha | null>(null);
+const lembreteDraft = ref("");
 
 const ANOS = [2024, 2025, 2026];
+const AUTO_REFRESH_MS = 5000;
+let autoRefreshTimer: number | null = null;
 
 const MES_LABEL: Record<string, string> = {
   "01": "Jan",
@@ -131,6 +138,15 @@ const resumo = computed(() => {
   return out;
 });
 
+const lastSyncLabel = computed(() => {
+  if (!lastSyncedAt.value) return "aguardando sync";
+  return `sync ${lastSyncedAt.value.toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  })}`;
+});
+
 function mesProgress(mes: MesLinha): number {
   let total = 0;
   let ok = 0;
@@ -179,6 +195,86 @@ function labelStatus(estado: Estado): string {
 function fmt(n: number | null | undefined): string {
   if (n === null || n === undefined) return "—";
   return n.toLocaleString("pt-BR");
+}
+
+const lembretesStorageKey = computed(
+  () => `s1210-anual-lembretes:${empresaId.value}:${ano.value}`,
+);
+
+function carregarLembretes() {
+  try {
+    const raw = window.localStorage.getItem(lembretesStorageKey.value);
+    const parsed = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+    const normalizado: Record<string, string[]> = {};
+    for (const [perApur, valor] of Object.entries(parsed)) {
+      if (Array.isArray(valor)) {
+        normalizado[perApur] = valor
+          .map((item) => String(item).trim())
+          .filter(Boolean);
+      } else if (typeof valor === "string" && valor.trim()) {
+        normalizado[perApur] = [valor.trim()];
+      }
+    }
+    lembretesMes.value = normalizado;
+  } catch {
+    lembretesMes.value = {};
+  }
+}
+
+function salvarLembretes() {
+  window.localStorage.setItem(
+    lembretesStorageKey.value,
+    JSON.stringify(lembretesMes.value),
+  );
+}
+
+function lembreteDoMes(perApur: string): string {
+  return lembretesDoMes(perApur).join("\n");
+}
+
+function lembretesDoMes(perApur: string): string[] {
+  return (lembretesMes.value[perApur] ?? [])
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function notasDoTexto(texto: string): string[] {
+  return texto
+    .split(/\r?\n|;/)
+    .map((linha) => linha.trim())
+    .filter(Boolean);
+}
+
+function abrirLembrete(mes: MesLinha) {
+  lembreteModalMes.value = mes;
+  lembreteDraft.value = lembreteDoMes(mes.per_apur);
+}
+
+function fecharLembrete() {
+  lembreteModalMes.value = null;
+  lembreteDraft.value = "";
+}
+
+function salvarLembreteAberto() {
+  const mes = lembreteModalMes.value;
+  if (!mes) return;
+  const notas = notasDoTexto(lembreteDraft.value);
+  const proximos = { ...lembretesMes.value };
+  if (notas.length > 0) proximos[mes.per_apur] = notas;
+  else delete proximos[mes.per_apur];
+  lembretesMes.value = proximos;
+  salvarLembretes();
+  fecharLembrete();
+}
+
+function excluirLembreteAberto() {
+  const mes = lembreteModalMes.value;
+  if (!mes) return;
+  const proximos = { ...lembretesMes.value };
+  delete proximos[mes.per_apur];
+  lembretesMes.value = proximos;
+  salvarLembretes();
+  fecharLembrete();
 }
 
 function abrirCelula(c: Celula) {
@@ -354,27 +450,53 @@ function voltarRepositorio() {
   router.push("/");
 }
 
-async function carregar() {
-  loading.value = true;
+async function carregar(opts: { silent?: boolean } = {}) {
+  const silent = opts.silent === true;
+  if (silent) isAutoRefreshing.value = true;
+  else loading.value = true;
   error.value = null;
   try {
     overview.value = (await s1210AnualOverview(
       ano.value,
       empresaId.value,
     )) as unknown as OverviewAnual;
+    lastSyncedAt.value = new Date();
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Falha ao carregar S-1210";
     error.value = msg;
-    overview.value = null;
+    if (!silent) overview.value = null;
   } finally {
-    loading.value = false;
+    if (silent) isAutoRefreshing.value = false;
+    else loading.value = false;
   }
 }
 
-watch([ano, empresaId], carregar);
-onMounted(() => {
+function iniciarAutoRefresh() {
+  if (autoRefreshTimer !== null) window.clearInterval(autoRefreshTimer);
+  autoRefreshTimer = window.setInterval(() => {
+    if (document.visibilityState !== "visible") return;
+    if (loading.value || isAutoRefreshing.value) return;
+    void carregar({ silent: true });
+  }, AUTO_REFRESH_MS);
+}
+
+function pararAutoRefresh() {
+  if (autoRefreshTimer !== null) {
+    window.clearInterval(autoRefreshTimer);
+    autoRefreshTimer = null;
+  }
+}
+
+watch([ano, empresaId], () => {
+  carregarLembretes();
   void carregar();
 });
+onMounted(() => {
+  carregarLembretes();
+  void carregar();
+  iniciarAutoRefresh();
+});
+onUnmounted(pararAutoRefresh);
 </script>
 
 <template>
@@ -387,10 +509,17 @@ onMounted(() => {
           S-1210 Anual
           <span
             class="repo-pill"
-            :title="error ? 'falha ao consultar repo' : 'overview sincronizado'"
-            :class="{ 'repo-pill--err': !!error }"
+            :title="
+              error
+                ? 'falha ao consultar repo'
+                : `overview sincronizado automaticamente a cada ${AUTO_REFRESH_MS / 1000}s`
+            "
+            :class="{
+              'repo-pill--err': !!error,
+              'repo-pill--refreshing': isAutoRefreshing,
+            }"
           >
-            {{ error ? "repo offline" : "repo sincronizado" }}
+            {{ error ? "repo offline" : lastSyncLabel }}
           </span>
         </div>
       </div>
@@ -415,7 +544,7 @@ onMounted(() => {
           class="icon-btn"
           :disabled="loading"
           title="Atualizar"
-          @click="carregar"
+          @click="() => carregar()"
         >
           <svg
             viewBox="0 0 24 24"
@@ -620,6 +749,12 @@ onMounted(() => {
                 "
                 >{{ mes.virtual ? "VIRTUAL" : "FECHADO" }}</span
               >
+              <span
+                v-else-if="mes.nr_recibo_abertura"
+                class="badge-aberto"
+                title="Mês reaberto no eSocial (S-1298)"
+                >ABERTO</span
+              >
               <button
                 class="btn-virtual"
                 :class="{ 'btn-virtual--on': mes.virtual }"
@@ -658,6 +793,19 @@ onMounted(() => {
                   <path d="M8 11V7a4 4 0 0 1 7.5-1.5" />
                 </svg>
               </button>
+              <button
+                class="btn-lembrete"
+                :class="{ 'btn-lembrete--on': !!lembreteDoMes(mes.per_apur) }"
+                :title="
+                  lembreteDoMes(mes.per_apur)
+                    ? `Nota: ${lembreteDoMes(mes.per_apur)}`
+                    : 'Adicionar nota do mês'
+                "
+                @click.stop="abrirLembrete(mes)"
+              >
+                <span class="btn-lembrete-plus">+</span>
+                Nota
+              </button>
             </div>
             <div class="cell-mes-sub">{{ mes.per_apur }}</div>
             <div
@@ -679,6 +827,12 @@ onMounted(() => {
                   ? mes.nr_recibo_fechamento
                   : "R: " + mes.nr_recibo_fechamento.slice(-10)
               }}
+            </div>
+            <div
+              v-else-if="mes.nr_recibo_abertura"
+              class="cell-mes-recibo cell-mes-recibo-abertura"
+            >
+              A: {{ mes.nr_recibo_abertura.slice(-10) }}
             </div>
           </div>
 
@@ -727,6 +881,30 @@ onMounted(() => {
                 <span v-if="(celulaDoLote(mes, n)!.na ?? 0) > 0" class="na"
                   ><b>{{ fmt(celulaDoLote(mes, n)!.na) }}</b> N/A</span
                 >
+              </div>
+              <div
+                v-if="lembretesDoMes(mes.per_apur).length > 0"
+                class="cell-notes"
+                :title="lembreteDoMes(mes.per_apur)"
+                role="button"
+                tabindex="0"
+                @click.stop="abrirLembrete(mes)"
+                @keydown.enter.stop.prevent="abrirLembrete(mes)"
+                @keydown.space.stop.prevent="abrirLembrete(mes)"
+              >
+                <span
+                  v-for="nota in lembretesDoMes(mes.per_apur).slice(0, 2)"
+                  :key="`${mes.per_apur}-${n}-${nota}`"
+                  class="cell-note"
+                >
+                  {{ nota }}
+                </span>
+                <span
+                  v-if="lembretesDoMes(mes.per_apur).length > 2"
+                  class="cell-note cell-note--more"
+                >
+                  +{{ lembretesDoMes(mes.per_apur).length - 2 }}
+                </span>
               </div>
               <div
                 v-if="
@@ -779,6 +957,73 @@ onMounted(() => {
         </div>
       </div>
     </section>
+
+    <div
+      v-if="lembreteModalMes"
+      class="lembrete-modal-backdrop"
+      role="presentation"
+      @click="fecharLembrete"
+    >
+      <section
+        class="lembrete-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="lembrete-modal-title"
+        @click.stop
+      >
+        <header class="lembrete-modal-head">
+          <div>
+            <p class="lembrete-modal-kicker">Lembrete do mês</p>
+            <h2 id="lembrete-modal-title">
+              {{ labelMes(lembreteModalMes.per_apur).label }}
+            </h2>
+          </div>
+          <button
+            class="lembrete-modal-close"
+            type="button"
+            title="Fechar"
+            @click="fecharLembrete"
+          >
+            ×
+          </button>
+        </header>
+
+        <textarea
+          v-model="lembreteDraft"
+          class="lembrete-modal-textarea"
+          rows="8"
+          placeholder="Digite os lembretes deste mês"
+          autofocus
+        ></textarea>
+
+        <footer class="lembrete-modal-actions">
+          <button
+            class="lembrete-modal-delete"
+            type="button"
+            :disabled="!lembreteDoMes(lembreteModalMes.per_apur)"
+            @click="excluirLembreteAberto"
+          >
+            Excluir
+          </button>
+          <div class="lembrete-modal-actions-right">
+            <button
+              type="button"
+              class="lembrete-modal-cancel"
+              @click="fecharLembrete"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              class="lembrete-modal-save"
+              @click="salvarLembreteAberto"
+            >
+              Salvar
+            </button>
+          </div>
+        </footer>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -883,6 +1128,9 @@ onMounted(() => {
   box-shadow:
     0 0 8px #ff6a7d,
     0 0 14px rgba(255, 90, 110, 0.7);
+}
+.repo-pill--refreshing::before {
+  animation-duration: 0.55s;
 }
 @keyframes live-pulse {
   0%,
@@ -1385,11 +1633,51 @@ onMounted(() => {
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--text-primary, #fff);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 .cell-mes-sub {
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
   font-size: 13px;
   color: var(--text-muted);
+}
+.btn-lembrete {
+  margin-left: 4px;
+  min-width: 56px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 0 7px;
+  border-radius: 6px;
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  background: rgba(245, 158, 11, 0.08);
+  color: #fbbf24;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+.btn-lembrete-plus {
+  font-family: "JetBrains Mono Variable", ui-monospace, monospace;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1;
+}
+.btn-lembrete:hover {
+  background: rgba(245, 158, 11, 0.18);
+  border-color: rgba(245, 158, 11, 0.58);
+  color: #fde68a;
+  transform: translateY(-1px);
+}
+.btn-lembrete--on {
+  background: rgba(245, 158, 11, 0.2);
+  border-color: rgba(245, 158, 11, 0.65);
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.28);
 }
 .cell-mes-bar {
   margin-top: 6px;
@@ -1542,6 +1830,172 @@ onMounted(() => {
   text-shadow: 0 0 6px rgba(124, 177, 255, 0.45);
 }
 
+.cell-notes {
+  align-self: center;
+  width: min(100%, 260px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: auto 0 2px;
+  padding: 2px 0;
+  cursor: pointer;
+}
+.cell-notes:focus-visible {
+  outline: 2px solid rgba(245, 158, 11, 0.75);
+  outline-offset: 3px;
+  border-radius: 7px;
+}
+.cell-note {
+  min-width: 0;
+  max-width: 118px;
+  display: inline-block;
+  padding: 3px 7px;
+  border: 1px solid rgba(245, 158, 11, 0.42);
+  border-radius: 5px;
+  background: rgba(245, 158, 11, 0.1);
+  color: #fbbf24;
+  font-family: "JetBrains Mono Variable", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.15;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.12);
+}
+.cell-note--more {
+  max-width: 42px;
+  color: #fde68a;
+  border-color: rgba(245, 158, 11, 0.62);
+  background: rgba(245, 158, 11, 0.18);
+}
+
+.lembrete-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(2, 6, 23, 0.72);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+.lembrete-modal {
+  width: min(560px, 100%);
+  border: 1px solid rgba(245, 158, 11, 0.34);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.96);
+  box-shadow:
+    0 24px 80px rgba(0, 0, 0, 0.52),
+    0 0 22px rgba(245, 158, 11, 0.12);
+  padding: 18px;
+}
+.lembrete-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+.lembrete-modal-kicker {
+  margin: 0 0 4px;
+  font-family: "JetBrains Mono Variable", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #fbbf24;
+}
+.lembrete-modal h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary, #fff);
+}
+.lembrete-modal-close {
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+.lembrete-modal-close:hover {
+  color: var(--text-primary, #fff);
+  background: rgba(255, 255, 255, 0.08);
+}
+.lembrete-modal-textarea {
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  border: 1px solid rgba(245, 158, 11, 0.32);
+  border-radius: 7px;
+  background: rgba(2, 6, 23, 0.48);
+  color: var(--text-primary, #fff);
+  padding: 12px;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.45;
+  outline: none;
+}
+.lembrete-modal-textarea:focus {
+  border-color: rgba(245, 158, 11, 0.72);
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.14);
+}
+.lembrete-modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+}
+.lembrete-modal-actions-right {
+  display: flex;
+  gap: 8px;
+}
+.lembrete-modal-delete,
+.lembrete-modal-cancel,
+.lembrete-modal-save {
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.lembrete-modal-delete {
+  border: 1px solid rgba(248, 113, 113, 0.46);
+  background: rgba(248, 113, 113, 0.08);
+  color: #fca5a5;
+}
+.lembrete-modal-delete:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+.lembrete-modal-cancel {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+}
+.lembrete-modal-save {
+  border: 1px solid rgba(245, 158, 11, 0.58);
+  background: rgba(245, 158, 11, 0.18);
+  color: #fde68a;
+}
+.lembrete-modal-delete:hover:not(:disabled),
+.lembrete-modal-cancel:hover,
+.lembrete-modal-save:hover {
+  transform: translateY(-1px);
+}
+
 .hint {
   font-size: 13px;
   color: var(--primary);
@@ -1621,6 +2075,21 @@ onMounted(() => {
   color: rgba(134, 239, 172, 0.85);
   margin-top: 4px;
   letter-spacing: 0.05em;
+}
+.badge-aberto {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  background: rgba(96, 165, 250, 0.18);
+  color: #bfdbfe;
+  border: 1px solid rgba(96, 165, 250, 0.5);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+.cell-mes-recibo-abertura {
+  color: #93c5fd;
 }
 .cell-mes-recibo-virtual {
   font-family: inherit;

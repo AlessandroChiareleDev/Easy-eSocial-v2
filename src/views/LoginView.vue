@@ -11,11 +11,22 @@ const showPwd = ref(false);
 const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
+const devLoginEnabled = import.meta.env.DEV;
 
 async function submit() {
   if (!email.value || !senha.value) return;
   try {
     await auth.login(email.value.trim(), senha.value);
+    const redirect = (route.query.redirect as string) || "/";
+    router.replace(redirect);
+  } catch {
+    // erro já vai pro auth.error
+  }
+}
+
+async function entrarLocal() {
+  try {
+    await auth.devLogin();
     const redirect = (route.query.redirect as string) || "/";
     router.replace(redirect);
   } catch {
@@ -187,6 +198,15 @@ function loginWith(provider: OAuthProvider) {
               />
             </svg>
             <span v-else>Entrar</span>
+          </button>
+          <button
+            v-if="devLoginEnabled"
+            type="button"
+            :disabled="auth.loading"
+            class="btn-dev-login"
+            @click="entrarLocal"
+          >
+            Entrar local como xandeadmin
           </button>
         </form>
 
@@ -762,6 +782,30 @@ function loginWith(provider: OAuthProvider) {
 }
 .btn-submit:disabled {
   opacity: 0.6;
+  cursor: not-allowed;
+}
+.btn-dev-login {
+  width: 100%;
+  height: 42px;
+  border-radius: 10px;
+  border: 1px dashed rgba(96, 165, 250, 0.45);
+  background: rgba(96, 165, 250, 0.08);
+  color: #bfdbfe;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    transform 0.15s;
+}
+.btn-dev-login:hover:not(:disabled) {
+  background: rgba(96, 165, 250, 0.16);
+  border-color: rgba(96, 165, 250, 0.7);
+  transform: translateY(-1px);
+}
+.btn-dev-login:disabled {
+  opacity: 0.55;
   cursor: not-allowed;
 }
 .btn-spin {

@@ -635,7 +635,24 @@ def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False, empresa_id: int 
                xml_bytes, xml_size_bytes, xml_sha256)
             VALUES %s
             ON CONFLICT (id_evento) WHERE id_evento IS NOT NULL DO UPDATE
-              SET dados_json = EXCLUDED.dados_json
+                            SET dados_json = CASE
+                                        WHEN explorador_eventos.dados_json IS NULL
+                                            OR NOT (
+                                                explorador_eventos.dados_json ? 'pagamentos'
+                                                OR explorador_eventos.dados_json ? 'infoIRCR'
+                                                OR explorador_eventos.dados_json ? 'infoIR'
+                                                OR explorador_eventos.dados_json ? 'totApurMen_CRMen'
+                                            )
+                                        THEN EXCLUDED.dados_json
+                                        ELSE explorador_eventos.dados_json
+                                    END,
+                                    zip_id = COALESCE(explorador_eventos.zip_id, EXCLUDED.zip_id),
+                                    xml_entry_name = COALESCE(explorador_eventos.xml_entry_name, EXCLUDED.xml_entry_name),
+                                    arquivo_origem = COALESCE(explorador_eventos.arquivo_origem, EXCLUDED.arquivo_origem),
+                                    referenciado_recibo = COALESCE(explorador_eventos.referenciado_recibo, EXCLUDED.referenciado_recibo),
+                                    xml_bytes = COALESCE(explorador_eventos.xml_bytes, EXCLUDED.xml_bytes),
+                                    xml_size_bytes = COALESCE(explorador_eventos.xml_size_bytes, EXCLUDED.xml_size_bytes),
+                                    xml_sha256 = COALESCE(explorador_eventos.xml_sha256, EXCLUDED.xml_sha256)
               WHERE explorador_eventos.tipo_evento IN ('S-1210','S-5002')
                 AND (
                   explorador_eventos.dados_json IS NULL
@@ -645,6 +662,12 @@ def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False, empresa_id: int 
                     OR explorador_eventos.dados_json ? 'infoIR'
                     OR explorador_eventos.dados_json ? 'totApurMen_CRMen'
                   )
+                                    OR explorador_eventos.zip_id IS NULL
+                                    OR explorador_eventos.xml_entry_name IS NULL
+                                    OR explorador_eventos.arquivo_origem IS NULL
+                                    OR explorador_eventos.xml_bytes IS NULL
+                                    OR explorador_eventos.xml_size_bytes IS NULL
+                                    OR explorador_eventos.xml_sha256 IS NULL
                 )
             RETURNING (xmax = 0) AS inserted_new
         """

@@ -309,11 +309,10 @@ def s1210_anual_overview(ano: int, empresa_id: int):
       2 = SOLUCOES  -> Local (internal_empresa_id=1)
     """
     from . import tenant
-    cfg = tenant.get_db_config_for_empresa(empresa_id)
     internal_id = tenant.internal_empresa_id(empresa_id)
 
     meses_out = []
-    conn = psycopg2.connect(**cfg)
+    conn = db.connect(empresa_id=empresa_id)
     try:
         for m in range(1, 13):
             per = f"{ano}-{m:02d}"
@@ -321,61 +320,108 @@ def s1210_anual_overview(ano: int, empresa_id: int):
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as c:
                 # 1) LEGACY V1: agrupado por lote_num (s1210_cpf_scope tem lote_num)
                 legacy_rows: list[dict] = []
-                try:
-                    c.execute(
-                        """
-                        WITH scope AS (
-                            SELECT lote_num, cpf
-                              FROM s1210_cpf_scope
-                             WHERE empresa_id=%s AND per_apur=%s AND cpf IS NOT NULL
-                        ),
-                        ult AS (
-                            SELECT DISTINCT ON (cpf) cpf, lote_num, status, codigo_resposta
-                              FROM s1210_cpf_envios
-                             WHERE empresa_id=%s AND per_apur=%s
-                             ORDER BY cpf, enviado_em DESC NULLS LAST, id DESC
-                        )
-                        SELECT
-                          COALESCE(s.lote_num, 1)                                       AS lote_num,
-                          COUNT(*)                                                      AS total,
-                          COUNT(*) FILTER (WHERE u.status IN ('ok','ok_recuperado'))    AS ok,
-                          COUNT(*) FILTER (WHERE u.status LIKE 'erro%%')                AS erro,
-                          COUNT(*) FILTER (WHERE u.status IN ('enviando','processando')) AS enviando,
-                          COUNT(*) FILTER (WHERE u.status = 'na')                       AS na,
-                          COUNT(*) FILTER (WHERE u.status IS NULL)                      AS pendente,
-                          COUNT(*) FILTER (WHERE u.status LIKE 'erro%%'
-                                             AND u.codigo_resposta IN ('401','459'))    AS recibo_retificado,
-                          COUNT(*) FILTER (WHERE u.status LIKE 'erro%%'
-                                             AND u.codigo_resposta = '202')             AS aceito_com_aviso
-                          FROM scope s
-                          LEFT JOIN ult u ON u.cpf = s.cpf
-                         GROUP BY COALESCE(s.lote_num, 1)
-                         ORDER BY lote_num
-                        """,
-                        (internal_id, per, internal_id, per),
-                    )
-                    legacy_rows = list(c.fetchall())
-                except Exception:
-                    conn.rollback()
-
-                # 2) Fallback V2 (timeline) — só quando legacy vazio
-                if not legacy_rows:
+                if int(empresa_id) == tenant.APPA_ID:
                     try:
                         c.execute(
                             """
                             WITH scope AS (
-                                SELECT DISTINCT ev.cpf
-                                  FROM explorador_eventos ev
+                                SELECT lote_num, cpf
+                                  FROM s1210_cpf_scope
+                                 WHERE empresa_id=%s AND per_apur=%s AND cpf IS NOT NULL
+                            ),
+                            ult AS (
+                                SELECT DISTINCT ON (cpf) cpf, lote_num, status, codigo_resposta
+                                  FROM s1210_cpf_envios
+                                 WHERE empresa_id=%s AND per_apur=%s
+                                 ORDER BY cpf, enviado_em DESC NULLS LAST, id DESC
+                            )
+                            SELECT
+                              COALESCE(s.lote_num, 1)                                       AS lote_num,
+                              COUNT(*)                                                      AS total,
+                              COUNT(*) FILTER (WHERE u.status IN ('ok','ok_recuperado'))    AS ok,
+                              COUNT(*) FILTER (WHERE u.status LIKE 'erro%%')                AS erro,
+                              COUNT(*) FILTER (WHERE u.status IN ('enviando','processando')) AS enviando,
+                              COUNT(*) FILTER (WHERE u.status = 'na')                       AS na,
+                              COUNT(*) FILTER (WHERE u.status IS NULL)                      AS pendente,
+                              COUNT(*) FILTER (WHERE u.status LIKE 'erro%%'
+                                                 AND u.codigo_resposta IN ('401','459'))    AS recibo_retificado,
+                              COUNT(*) FILTER (WHERE u.status LIKE 'erro%%'
+                                                 AND u.codigo_resposta = '202')             AS aceito_com_aviso
+                              FROM scope s
+                              LEFT JOIN ult u ON u.cpf = s.cpf
+                             GROUP BY COALESCE(s.lote_num, 1)
+                             ORDER BY lote_num
+                            """,
+                            (internal_id, per, internal_id, per),
+                        )
+                        legacy_rows = list(c.fetchall())
+                    except Exception:
+                        conn.rollback()
+
+                # 2) Fallback V2 (timeline) — só quando legacy vazio.
+                # Importante: explorador_eventos é bruto. Um ZIP usado para
+                # backfill de um mês pode conter XMLs de outro per_apur. A
+                # visão anual só deve considerar o mês quando existe
+                # timeline_mes; caso contrário, XML bruto isolado viraria
+                # falso "Pronto"/pendente.
+                if not legacy_rows:
+                    try:
+                        c.execute(
+                                                        """
+                                                        WITH tm AS (
+                                                                SELECT id
+                                                                    FROM timeline_mes
+                                                                 WHERE empresa_id=%s
+                                                                     AND per_apur=%s
+                                                                 LIMIT 1
+                                                        ),
+                                                        scope AS (
+                                                                SELECT DISTINCT ON (ev.cpf)
+                                                                             ev.cpf, ev.origem_envio_id
+                                                                    FROM explorador_eventos ev, tm
                                  WHERE ev.tipo_evento='S-1210'
                                    AND ev.per_apur=%s
                                    AND ev.retificado_por_id IS NULL
                                    AND ev.cpf IS NOT NULL
+                                                                 ORDER BY ev.cpf, ev.dt_processamento DESC NULLS LAST, ev.id DESC
                             ),
                             ult AS (
-                                SELECT DISTINCT ON (it.cpf) it.cpf, it.status, it.erro_codigo
+                                                                SELECT DISTINCT ON (it.cpf)
+                                                                             it.cpf,
+                                                                             CASE
+                                                                                 WHEN it.status LIKE 'erro%%'
+                                                                                    AND it.erro_codigo = '401'
+                                                                                    AND (
+                                                                                        it.erro_mensagem ILIKE '%%620:%%'
+                                                                                        OR it.erro_mensagem ILIKE '%%folha de pagamento%%fechada%%'
+                                                                                    )
+                                                                                    AND r.dt_abertura IS NOT NULL
+                                                                                    AND r.dt_abertura >= it.criado_em
+                                                                                 THEN NULL
+                                                                                 ELSE it.status
+                                                                             END AS status,
+                                                                             CASE
+                                                                                 WHEN it.status LIKE 'erro%%'
+                                                                                    AND it.erro_codigo = '401'
+                                                                                    AND (
+                                                                                        it.erro_mensagem ILIKE '%%620:%%'
+                                                                                        OR it.erro_mensagem ILIKE '%%folha de pagamento%%fechada%%'
+                                                                                    )
+                                                                                    AND r.dt_abertura IS NOT NULL
+                                                                                    AND r.dt_abertura >= it.criado_em
+                                                                                 THEN NULL
+                                                                                 ELSE it.erro_codigo
+                                                                             END AS erro_codigo
                                   FROM timeline_envio_item it
                                   JOIN timeline_envio te ON te.id=it.timeline_envio_id
                                   JOIN timeline_mes tm   ON tm.id=te.timeline_mes_id
+                                                                    CROSS JOIN (
+                                                                        SELECT MAX(dt_processamento) AS dt_abertura
+                                                                            FROM explorador_eventos
+                                                                         WHERE tipo_evento='S-1298'
+                                                                             AND cd_resposta='201'
+                                                                             AND per_apur=%s
+                                                                    ) r
                                  WHERE tm.empresa_id=%s
                                    AND tm.per_apur=%s
                                    AND it.tipo_evento='S-1210'
@@ -387,9 +433,9 @@ def s1210_anual_overview(ano: int, empresa_id: int):
                               COUNT(*) FILTER (WHERE u.status = 'sucesso')                  AS ok,
                               COUNT(*) FILTER (WHERE u.status LIKE 'erro%%')                AS erro,
                               COUNT(*) FILTER (WHERE u.status IN ('enviando','processando')) AS enviando,
-                              0                                                             AS na,
+                              COUNT(*) FILTER (WHERE u.status = 'sem_mudanca')              AS na,
                               COUNT(*) FILTER (WHERE u.status IS NULL
-                                                 OR u.status NOT IN ('sucesso','enviando','processando')
+                                                 OR u.status NOT IN ('sucesso','enviando','processando','sem_mudanca')
                                                  AND u.status NOT LIKE 'erro%%')           AS pendente,
                               COUNT(*) FILTER (WHERE u.status LIKE 'erro%%'
                                                  AND u.erro_codigo IN ('401','459'))        AS recibo_retificado,
@@ -398,7 +444,7 @@ def s1210_anual_overview(ano: int, empresa_id: int):
                               FROM scope s
                               LEFT JOIN ult u ON u.cpf = s.cpf
                             """,
-                            (per, internal_id, per),
+                            (internal_id, per, per, per, internal_id, per),
                         )
                         row = c.fetchone()
                         if row and (row.get("total") or 0) > 0:
@@ -549,6 +595,7 @@ def s1210_anual_overview(ano: int, empresa_id: int):
             virtual_fechado = (
                 bool(info.get("fechado")) and info.get("fechamento_origem") == "virtual"
             )
+            ja_aberto_esocial = info.get("fechamento_origem") == "s1298_ja_aberto_esocial"
             if r99 and r98:
                 fechado_real = (r99["dt"] or "") >= (r98["dt"] or "")
             elif r99:
@@ -557,10 +604,10 @@ def s1210_anual_overview(ano: int, empresa_id: int):
                 fechado_real = False
             else:
                 fechado_real = False
-            fechado_final = fechado_real or virtual_fechado
+            fechado_final = (fechado_real and not ja_aberto_esocial) or virtual_fechado
             mes["fechado"] = fechado_final
             mes["virtual"] = virtual_fechado and not fechado_real
-            if fechado_real:
+            if fechado_final and fechado_real:
                 mes["nr_recibo_fechamento"] = (r99 or {}).get("nr_recibo") or info.get("nr_recibo_fechamento")
                 mes["dt_fechamento"] = (r99 or {}).get("dt") or info.get("fechamento_em")
                 mes["fechamento_origem"] = info.get("fechamento_origem")
@@ -573,7 +620,9 @@ def s1210_anual_overview(ano: int, empresa_id: int):
                 mes["dt_fechamento"] = None
                 mes["fechamento_origem"] = info.get("fechamento_origem")
             mes["nr_recibo_abertura"] = (r98 or {}).get("nr_recibo")
-            mes["dt_abertura"] = (r98 or {}).get("dt")
+            mes["dt_abertura"] = (r98 or {}).get("dt") or (
+                info.get("fechamento_em") if ja_aberto_esocial else None
+            )
     finally:
         try:
             conn.close()
@@ -802,21 +851,30 @@ def s1210_cpfs_do_mes(per_apur: str, empresa_id: int, lote_num: int = 1):
                 except Exception:
                     conn.rollback()
             else:
-                # 2) Fallback V2: explorador_eventos + timeline_envio_item
+                                # 2) Fallback V2: explorador_eventos + timeline_envio_item.
+                                # Só lista CPFs se o mês já tiver timeline_mes. XML bruto de
+                                # outro per_apur dentro de um ZIP não deve criar escopo anual.
                 try:
                     c.execute(
                         """
+                                                WITH tm AS (
+                                                        SELECT id
+                                                            FROM timeline_mes
+                                                         WHERE empresa_id=%s
+                                                             AND per_apur=%s
+                                                         LIMIT 1
+                                                )
                         SELECT DISTINCT ON (ev.cpf)
                                ev.id, ev.cpf, ev.nr_recibo, ev.referenciado_recibo,
-                               ev.dt_processamento
-                          FROM explorador_eventos ev
+                                                             ev.dt_processamento, ev.origem_envio_id
+                                                    FROM explorador_eventos ev, tm
                          WHERE ev.tipo_evento='S-1210'
                            AND ev.per_apur=%s
                            AND ev.retificado_por_id IS NULL
                            AND ev.cpf IS NOT NULL
                          ORDER BY ev.cpf, ev.dt_processamento DESC NULLS LAST, ev.id DESC
                         """,
-                        (per_apur,),
+                        (internal_id, per_apur, per_apur),
                     )
                     cpfs_rows = list(c.fetchall())
                 except Exception:
@@ -866,6 +924,7 @@ def s1210_cpfs_do_mes(per_apur: str, empresa_id: int, lote_num: int = 1):
     for r in cpfs_rows:
         u = ultimo_por_cpf.get(r["cpf"])
         criado = u["criado_em"].isoformat() if u and hasattr(u.get("criado_em"), "isoformat") else (u and u.get("criado_em")) or None
+        status = _norm_status(u["status"] if u else None)
         cpfs_out.append({
             "cpf": r["cpf"],
             "nome": None,
@@ -874,7 +933,7 @@ def s1210_cpfs_do_mes(per_apur: str, empresa_id: int, lote_num: int = 1):
             "row_number": None,
             "tem_xml": bool(r.get("nr_recibo")),
             "nr_recibo_xml": r.get("nr_recibo"),
-            "status": _norm_status(u["status"] if u else None),
+            "status": status,
             "nr_recibo_usado": (u or {}).get("nr_recibo_usado"),
             "nr_recibo_novo": (u or {}).get("nr_recibo_novo"),
             "erro_codigo": (u or {}).get("erro_codigo"),

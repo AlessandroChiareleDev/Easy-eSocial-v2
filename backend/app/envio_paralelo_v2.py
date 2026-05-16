@@ -35,7 +35,7 @@ from .envio_teste_100 import (
     _carregar_eventos_alvo,
     _criar_timeline_envio,
     _criar_items,
-    _ler_xml_lo,
+    _ler_xml_evento,
     _gravar_xml_enviado,
     _gravar_xml_retorno,
     _set_xml_enviado_oid,
@@ -82,12 +82,13 @@ class Progress:
             if self.tentados - self.last_report_at >= self.every or self.tentados >= self.total:
                 self.last_report_at = self.tentados
                 elapsed = time.time() - self.t0
-                vel = (self.tentados / elapsed * 60) if elapsed > 0 else 0
+                vel_s = (self.tentados / elapsed) if elapsed > 0 else 0
+                vel_min = vel_s * 60
                 taxa_erro = (self.erro / self.tentados * 100) if self.tentados else 0
                 print(
                     f"  [PROGRESSO] {self.tentados}/{self.total}  "
                     f"ok={self.ok}  erro={self.erro}  pend_consulta={self.pendente_consulta}  "
-                    f"vel={vel:.1f} CPF/min  taxa_erro={taxa_erro:.1f}%  "
+                    f"vel={vel_s:.2f} CPF/s ({vel_min:.1f} CPF/min)  taxa_erro={taxa_erro:.1f}%  "
                     f"elapsed={elapsed:.0f}s",
                     flush=True,
                 )
@@ -150,6 +151,7 @@ def _processar_batch_paralelo(
     eventos: list[dict],
     items: list[int],
     *,
+    empresa_id: int,
     cert_path: str,
     cert_password: str,
     cnpj: str,
@@ -160,9 +162,9 @@ def _processar_batch_paralelo(
 ) -> dict:
     """Espelho de _processar_lote, mas com polling cumulativo + conexoes proprias."""
     log_prefix = f"  [B{batch_idx:02d}] "
-    conn_db = db.connect()
-    conn_lo = db.connect()
-    conn_w = db.connect()
+    conn_db = db.connect(empresa_id=empresa_id)
+    conn_lo = db.connect(empresa_id=empresa_id)
+    conn_w = db.connect(empresa_id=empresa_id)
     try:
         return _processar_batch_inner(
             eventos, items,
@@ -201,7 +203,7 @@ def _processar_batch_inner(
 
     for seq, (item_id, ev) in enumerate(zip(items, eventos), start=1):
         try:
-            xml_antigo = _ler_xml_lo(conn_lo, int(ev["xml_oid"]))
+            xml_antigo = _ler_xml_evento(conn_lo, ev)
             campos = extrair_s1210(xml_antigo)
         except Exception as e:  # noqa: BLE001
             falhas_prep.append((item_id, "extrair_xml", f"{type(e).__name__}: {e}"))
@@ -439,7 +441,7 @@ def rodar_paralelo(
         workers = 5
 
     # 1) carregar eventos + criar timeline + items (via conexao admin)
-    conn_admin = db.connect()
+    conn_admin = db.connect(empresa_id=empresa_id)
     try:
         eventos = _carregar_eventos_alvo(
             conn_admin, empresa_id, per_apur, limite,
@@ -479,6 +481,7 @@ def rodar_paralelo(
             ex.submit(
                 _processar_batch_paralelo,
                 evs, ids,
+                empresa_id=empresa_id,
                 cert_path=cert_path, cert_password=cert_password, cnpj=cnpj,
                 ambiente=ambiente, pfx_data=pfx_data,
                 progress=progress, batch_idx=idx,
@@ -497,7 +500,7 @@ def rodar_paralelo(
                 erro_total += 1
 
     # 6) histograma + finalizar envio
-    conn_admin = db.connect()
+    conn_admin = db.connect(empresa_id=empresa_id)
     try:
         histograma: dict[str, int] = {}
         with conn_admin.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as c:
@@ -524,13 +527,14 @@ def rodar_paralelo(
         conn_admin.close()
 
     elapsed = time.time() - progress.t0
-    vel = len(eventos) / elapsed * 60 if elapsed > 0 else 0
+    vel_s = len(eventos) / elapsed if elapsed > 0 else 0
+    vel_min = vel_s * 60
     print("\n=== RESUMO PARALELO ===")
     print(f"envio_id          : {envio_id}")
     print(f"sucesso           : {sucesso_total}")
     print(f"erro              : {erro_total}")
     print(f"pendente_consulta : {pend_total}  (rodar reconsulta antes de tratar como erro!)")
-    print(f"elapsed           : {elapsed:.0f}s ({vel:.1f} CPF/min)")
+    print(f"elapsed           : {elapsed:.0f}s ({vel_s:.2f} CPF/s, {vel_min:.1f} CPF/min)")
     print(f"histograma erros  : {histograma}")
     return {
         "ok": True, "envio_id": envio_id,

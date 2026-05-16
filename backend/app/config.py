@@ -66,6 +66,7 @@ SISTEMA_DB_URL = _env("SISTEMA_DB_URL", "")
 JWT_SECRET = _env("JWT_SECRET", "")
 JWT_ALGORITHM = _env("JWT_ALGORITHM", "HS256")
 JWT_EXPIRES_MINUTES = int(_env("JWT_EXPIRES_MINUTES", "480"))  # 8h
+LOCAL_DEV_LOGIN = _env("LOCAL_DEV_LOGIN", "false").lower() == "true"
 
 # Fernet key (44 bytes base64) para encriptar senhas de certificado A1.
 FERNET_KEY = _env("FERNET_KEY", "")

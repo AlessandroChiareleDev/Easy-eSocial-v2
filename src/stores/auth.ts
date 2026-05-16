@@ -105,6 +105,34 @@ export const useAuthStore = defineStore("auth", () => {
     }
   }
 
+  async function devLogin(): Promise<void> {
+    loading.value = true;
+    error.value = null;
+    try {
+      const { api } = await import("@/services/api");
+      const res = await api.post<LoginResponse>(
+        "/auth/dev-login",
+        {},
+        { skipAuth: true, skipTenant: true },
+      );
+      token.value = res.token;
+      user.value = res.user;
+      empresas.value = res.empresas ?? [];
+      saveToStorage({
+        token: res.token,
+        user: res.user,
+        empresas: empresas.value,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Falha no login local";
+      error.value = msg;
+      clear();
+      throw e;
+    } finally {
+      loading.value = false;
+    }
+  }
+
   function clear(): void {
     token.value = null;
     user.value = null;
@@ -127,6 +155,7 @@ export const useAuthStore = defineStore("auth", () => {
     isSuperAdmin,
     initials,
     login,
+    devLogin,
     clear,
   };
 });

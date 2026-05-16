@@ -14,11 +14,11 @@ export default defineConfig({
   server: {
     port: 5174,
     strictPort: true,
-    // Proxy reverso pro backend V2 unificado (FastAPI :8000)
+    // Proxy reverso pro backend V2 unificado (FastAPI local)
     // Frontend chama sempre /api/... → same-origin, CSP fica simples
     proxy: {
       "/api": {
-        target: "http://localhost:8000",
+        target: "http://127.0.0.1:8000",
         changeOrigin: true,
         // uploads grandes (XLSX dominio, ZIPs eSocial) — sem timeout
         timeout: 0,
@@ -26,12 +26,12 @@ export default defineConfig({
       },
       // LEGACY V1 — manter ate frontend ser totalmente migrado
       "/py-api": {
-        target: "http://localhost:8000",
+        target: "http://127.0.0.1:8000",
         changeOrigin: true,
         rewrite: (p) => p.replace(/^\/py-api/, ""),
       },
       "/explorador-api": {
-        target: "http://localhost:8000",
+        target: "http://127.0.0.1:8000",
         changeOrigin: true,
         rewrite: (p) => p.replace(/^\/explorador-api/, ""),
         timeout: 0,

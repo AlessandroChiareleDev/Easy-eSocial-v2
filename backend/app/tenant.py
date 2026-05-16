@@ -44,16 +44,21 @@ _EMPRESA_SCHEMA = {
 def get_db_config_for_empresa(empresa_id: Optional[int]) -> dict:
     """Retorna a config psycopg2 com search_path setado pelo schema da empresa.
 
-    APPA e SOLUCOES vivem ambas no mesmo Supabase (schemas separados).
+    APPA e SOLUCOES vivem ambas no mesmo Supabase V2 (schemas separados).
     Injetamos `options=-csearch_path=<schema>,public` para que queries
     sem schema explicito caiam no tenant correto.
     """
     eid = int(empresa_id) if empresa_id is not None else SOLUCOES_ID
+    schema = _EMPRESA_SCHEMA.get(eid, "public")
+    if config.SISTEMA_DB_URL:
+        return {
+            "dsn": config.SISTEMA_DB_URL,
+            "options": f"-csearch_path={schema},public",
+        }
     if config.SUPABASE_DB_CONFIG is None:
         raise RuntimeError(
             "SUPABASE_DB_CONFIG nao configurado (.env). APPA/SOLUCOES vivem no Supabase."
         )
-    schema = _EMPRESA_SCHEMA.get(eid, "public")
     cfg = dict(config.SUPABASE_DB_CONFIG)  # copia rasa pra nao mutar global
     cfg["options"] = f"-csearch_path={schema},public"
     return cfg

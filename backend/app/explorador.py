@@ -536,11 +536,10 @@ _EXTRA_COLS_READY: set[int] = set()
 
 
 def _ensure_extract_columns(empresa_id: int | None) -> None:
-    """Garante que existam:
-      - explorador_eventos.xml_bytes BYTEA (storage inline rapido — substitui
-        o lobject por evento que custava 2 round trips extras pelo pooler)
-      - empresa_zips_brutos.extracao_progresso JSONB (contador ao vivo)
-    Idempotente. Chamado uma vez por tenant por processo.
+    """Garante colunas extras usadas na extração.
+
+    `xml_bytes` é legado; novas extrações usam o ZIP como fonte do XML para
+    evitar duplicar milhões de XMLs no banco.
     """
     tkey = int(empresa_id) if empresa_id is not None else 0
     if tkey in _EXTRA_COLS_READY:
@@ -574,11 +573,11 @@ def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False, empresa_id: int 
       empresa_id: roteia para o tenant correto (default APPA=1). ZIPs da
         SOLUCOES (empresa_id=2) estão em outro banco.
 
-    PERF (2026-05-11):
-      - XML armazenado inline em `xml_bytes` (BYTEA) em vez de criar 1
-        Large Object por evento — corta 2 round trips por XML ao pooler.
-      - INSERT em batches de 200 via execute_values — corta a maioria dos
-        round trips restantes.
+        PERF (2026-05-11/2026-05-16):
+            - O XML cru fica no ZIP original; `explorador_eventos` guarda metadados,
+                dados_json, tamanho/hash e caminho interno. Isso evita duplicar o ZIP
+                em milhões de linhas BYTEA e o download extrai sob demanda.
+            - INSERT em batches via execute_values — corta a maioria dos round trips.
       - extracao_progresso JSONB atualizada a cada batch pro frontend
         poder mostrar progresso ao vivo via GET /zips/{id}/progresso.
     """
@@ -650,7 +649,6 @@ def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False, empresa_id: int 
                                     xml_entry_name = COALESCE(explorador_eventos.xml_entry_name, EXCLUDED.xml_entry_name),
                                     arquivo_origem = COALESCE(explorador_eventos.arquivo_origem, EXCLUDED.arquivo_origem),
                                     referenciado_recibo = COALESCE(explorador_eventos.referenciado_recibo, EXCLUDED.referenciado_recibo),
-                                    xml_bytes = COALESCE(explorador_eventos.xml_bytes, EXCLUDED.xml_bytes),
                                     xml_size_bytes = COALESCE(explorador_eventos.xml_size_bytes, EXCLUDED.xml_size_bytes),
                                     xml_sha256 = COALESCE(explorador_eventos.xml_sha256, EXCLUDED.xml_sha256)
               WHERE explorador_eventos.tipo_evento IN ('S-1210','S-5002')
@@ -665,7 +663,6 @@ def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False, empresa_id: int 
                                     OR explorador_eventos.zip_id IS NULL
                                     OR explorador_eventos.xml_entry_name IS NULL
                                     OR explorador_eventos.arquivo_origem IS NULL
-                                    OR explorador_eventos.xml_bytes IS NULL
                                     OR explorador_eventos.xml_size_bytes IS NULL
                                     OR explorador_eventos.xml_sha256 IS NULL
                 )
@@ -848,7 +845,7 @@ def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False, empresa_id: int 
                             zip_id,
                             name,
                             evt.referenciado_recibo,
-                            psycopg2.Binary(data),
+                            None,
                             x_size,
                             x_sha,
                         ))

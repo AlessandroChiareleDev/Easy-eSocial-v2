@@ -202,9 +202,14 @@ function abrirDetalheDoErro() {
   void abrirDetalhe(r);
 }
 
-function baixarXml(cpf: string) {
-  const url = `/py-api/api/s1210-repo/xml-cpf?per_apur=${encodeURIComponent(props.per_apur)}&cpf=${cpf}&empresa_id=${empresaId.value}`;
-  // window.open dispara download via Content-Disposition
+function baixarXml(r: CpfRow) {
+  const url = urlXmlCpf(
+    r.lote_num,
+    props.per_apur,
+    r.cpf,
+    empresaId.value,
+    "S-1210",
+  );
   window.open(url, "_blank");
 }
 
@@ -492,7 +497,7 @@ function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
                         : 'XML não indexado para este CPF'
                       : 'Disponível apenas para empresa Soluções'
                   "
-                  @click.stop="baixarXml(r.cpf)"
+                  @click.stop="baixarXml(r)"
                 >
                   ⬇ XML
                 </button>
@@ -580,7 +585,7 @@ function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
             <button
               class="btn-xml"
               :disabled="!PODE_BAIXAR_XML || !erroSelecionado.tem_xml"
-              @click="baixarXml(erroSelecionado.cpf)"
+              @click="baixarXml(erroSelecionado)"
             >
               ⬇ XML
             </button>

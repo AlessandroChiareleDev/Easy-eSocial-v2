@@ -864,17 +864,28 @@ def s1210_cpfs_do_mes(per_apur: str, empresa_id: int, lote_num: int = 1):
                                                              AND per_apur=%s
                                                          LIMIT 1
                                                 )
-                        SELECT DISTINCT ON (ev.cpf)
-                               ev.id, ev.cpf, ev.nr_recibo, ev.referenciado_recibo,
-                                                             ev.dt_processamento, ev.origem_envio_id
-                                                    FROM explorador_eventos ev, tm
+                                                SELECT DISTINCT ON (ev.cpf)
+                                                             ev.id, ev.cpf, ev.nr_recibo, ev.referenciado_recibo,
+                                                             ev.dt_processamento, ev.origem_envio_id,
+                                                             (
+                                                                 ev.xml_bytes IS NOT NULL
+                                                                 OR (ev.xml_oid IS NOT NULL AND EXISTS (
+                                                                            SELECT 1 FROM pg_largeobject_metadata lom WHERE lom.oid=ev.xml_oid
+                                                                        ))
+                                                                 OR (ev.xml_entry_name IS NOT NULL AND EXISTS (
+                                                                            SELECT 1 FROM pg_largeobject_metadata lom_zip WHERE lom_zip.oid=z.conteudo_oid
+                                                                        ))
+                                                             ) AS tem_xml_disponivel
+                                                    FROM explorador_eventos ev
+                                                    JOIN empresa_zips_brutos z ON z.id=ev.zip_id AND z.empresa_id=%s
+                                                    JOIN tm ON TRUE
                          WHERE ev.tipo_evento='S-1210'
                            AND ev.per_apur=%s
                            AND ev.retificado_por_id IS NULL
                            AND ev.cpf IS NOT NULL
                          ORDER BY ev.cpf, ev.dt_processamento DESC NULLS LAST, ev.id DESC
                         """,
-                        (internal_id, per_apur, per_apur),
+                                                (internal_id, per_apur, internal_id, per_apur),
                     )
                     cpfs_rows = list(c.fetchall())
                 except Exception:
@@ -925,13 +936,14 @@ def s1210_cpfs_do_mes(per_apur: str, empresa_id: int, lote_num: int = 1):
         u = ultimo_por_cpf.get(r["cpf"])
         criado = u["criado_em"].isoformat() if u and hasattr(u.get("criado_em"), "isoformat") else (u and u.get("criado_em")) or None
         status = _norm_status(u["status"] if u else None)
+        tem_xml_disponivel = r.get("tem_xml_disponivel")
         cpfs_out.append({
             "cpf": r["cpf"],
             "nome": None,
             "matricula": None,
             "lote_num": lote_num,
             "row_number": None,
-            "tem_xml": bool(r.get("nr_recibo")),
+            "tem_xml": bool(tem_xml_disponivel) if tem_xml_disponivel is not None else bool(r.get("nr_recibo")),
             "nr_recibo_xml": r.get("nr_recibo"),
             "status": status,
             "nr_recibo_usado": (u or {}).get("nr_recibo_usado"),

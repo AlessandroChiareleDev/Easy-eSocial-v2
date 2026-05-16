@@ -16,13 +16,15 @@ from __future__ import annotations
 
 import logging
 import re
+import zipfile
 from typing import Optional
 
 import psycopg2
 import psycopg2.extras
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import Response
 
-from . import tenant
+from . import storage, tenant
 
 log = logging.getLogger(__name__)
 
@@ -411,8 +413,6 @@ def detalhe_cpf(
 
 # ═════════════════════════════════════════════════════════════════════
 # GET /anual/xml-cpf/{lote_num}/{per_apur}/{cpf}?tipo=S-1210|S-5002
-# V2 NÃO armazena XMLs crus (apenas dados_json extraído).
-# Mantemos o endpoint para compatibilidade do front, retornando 410.
 # ═════════════════════════════════════════════════════════════════════
 @router.get("/anual/xml-cpf/{lote_num}/{per_apur}/{cpf}")
 def baixar_xml_cpf(
@@ -422,11 +422,83 @@ def baixar_xml_cpf(
     empresa_id: int = Query(...),
     tipo: str = Query("S-1210", pattern=r"^S-(1210|5002)$"),
 ):
-    raise HTTPException(
-        status_code=410,
-        detail=(
-            f"XML cru de {tipo} não está armazenado no V2 — apenas os dados "
-            "extraídos (dados_json) ficam no banco. Para o XML original, "
-            "consulte o ZIP do eSocial."
-        ),
-    )
+    cpf = (cpf or "").strip().replace(".", "").replace("-", "")
+    if len(cpf) != 11 or not cpf.isdigit():
+        raise HTTPException(400, "CPF inválido")
+    if not re.fullmatch(r"\d{4}-\d{2}", per_apur or ""):
+        raise HTTPException(400, "per_apur deve estar no formato AAAA-MM")
+
+    cfg = tenant.get_db_config_for_empresa(empresa_id)
+    internal_id = tenant.internal_empresa_id(empresa_id)
+
+    conn = psycopg2.connect(**cfg)
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT e.id, e.xml_entry_name, e.xml_oid, e.xml_bytes,
+                       z.conteudo_oid, z.tamanho_bytes, z.nome_arquivo_original
+                  FROM explorador_eventos e
+                  JOIN empresa_zips_brutos z ON z.id=e.zip_id
+                 WHERE z.empresa_id=%s
+                   AND e.tipo_evento=%s
+                   AND e.cpf=%s
+                   AND e.per_apur=%s
+                 ORDER BY (e.retificado_por_id IS NULL) DESC,
+                          e.dt_processamento DESC NULLS LAST,
+                          e.id DESC
+                 LIMIT 20
+                """,
+                (internal_id, tipo, cpf, per_apur),
+            )
+            rows = list(cur.fetchall() or [])
+        if not rows:
+            raise HTTPException(404, f"XML {tipo} não encontrado para este CPF/período")
+
+        last_error = ""
+        for row in rows:
+            data: bytes | None = None
+            if row.get("xml_bytes") is not None:
+                data = bytes(row["xml_bytes"])
+
+            if data is None and row.get("xml_oid") is not None:
+                try:
+                    lo = conn.lobject(int(row["xml_oid"]), mode="rb")
+                    try:
+                        data = lo.read()
+                    finally:
+                        lo.close()
+                except Exception as exc:
+                    conn.rollback()
+                    last_error = str(exc).strip()
+                    data = None
+
+            if data is None and row.get("xml_entry_name"):
+                try:
+                    reader = storage.LargeObjectReader(
+                        conn,
+                        int(row["conteudo_oid"]),
+                        int(row["tamanho_bytes"]),
+                    )
+                    try:
+                        with zipfile.ZipFile(reader, mode="r") as zf:
+                            with zf.open(row["xml_entry_name"]) as fh:
+                                data = fh.read()
+                    finally:
+                        reader.close()
+                except Exception as exc:
+                    conn.rollback()
+                    last_error = str(exc).strip()
+                    data = None
+
+            if data is not None:
+                filename = (row.get("xml_entry_name") or f"{tipo}_{cpf}_{per_apur}.xml").split("/")[-1]
+                headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+                return Response(content=data, media_type="application/xml", headers=headers)
+    finally:
+        conn.close()
+
+    detail = "XML bruto existe no índice, mas o arquivo/large object não está mais recuperável"
+    if last_error:
+        detail = f"{detail}: {last_error}"
+    raise HTTPException(404, detail)

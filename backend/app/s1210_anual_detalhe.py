@@ -413,7 +413,9 @@ def detalhe_cpf(
 
 # ═════════════════════════════════════════════════════════════════════
 # GET /anual/xml-cpf/{lote_num}/{per_apur}/{cpf}?tipo=S-1210|S-5002
+# Compat: /xml-cpf e /xml-cpf/{lote_num}/{per_apur}/{cpf} atendem bundles antigos.
 # ═════════════════════════════════════════════════════════════════════
+@router.get("/xml-cpf/{lote_num}/{per_apur}/{cpf}")
 @router.get("/anual/xml-cpf/{lote_num}/{per_apur}/{cpf}")
 def baixar_xml_cpf(
     lote_num: int,
@@ -502,3 +504,14 @@ def baixar_xml_cpf(
     if last_error:
         detail = f"{detail}: {last_error}"
     raise HTTPException(404, detail)
+
+
+@router.get("/xml-cpf")
+def baixar_xml_cpf_query_compat(
+    per_apur: str = Query(...),
+    cpf: str = Query(...),
+    empresa_id: int = Query(...),
+    lote_num: int = Query(1),
+    tipo: str = Query("S-1210", pattern=r"^S-(1210|5002)$"),
+):
+    return baixar_xml_cpf(lote_num, per_apur, cpf, empresa_id, tipo)

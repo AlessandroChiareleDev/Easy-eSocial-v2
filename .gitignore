@@ -80,6 +80,17 @@ coverage/
 .tmp/
 tmp/
 temp/
+_tmp_*.py
+*_tmp*.json
+backend/_tmp_*.json
+backend/_tmp_*.py
+inspect_*.py
+backend/search_cpf.py
+
+# --- Bancos locais / artefatos operacionais ---
+*.db
+*.sqlite
+*.sqlite3
 
 # --- TypeScript build info ---
 *.tsbuildinfo

@@ -2,6 +2,7 @@
 import { ref, watch } from "vue";
 import {
   cadeiaCpf,
+  downloadXmlTentativa,
   type CadeiaResp,
   type CadeiaVersao,
 } from "@/services/exploradorApi";
@@ -17,6 +18,7 @@ const emit = defineEmits<{ (e: "fechar"): void }>();
 const carregando = ref(false);
 const erro = ref<string | null>(null);
 const dados = ref<CadeiaResp | null>(null);
+const baixandoXml = ref<Record<string, boolean>>({});
 
 async function carregar() {
   if (!props.cpf) return;
@@ -59,6 +61,29 @@ function statusBadge(s: string) {
       pendente: "info",
     }[s] ?? "info"
   );
+}
+
+function xmlKey(itemId: number, tipo: "enviado" | "retorno") {
+  return `${itemId}:${tipo}`;
+}
+
+function isBaixandoXml(itemId: number, tipo: "enviado" | "retorno") {
+  return Boolean(baixandoXml.value[xmlKey(itemId, tipo)]);
+}
+
+async function baixarXml(itemId: number, tipo: "enviado" | "retorno") {
+  const key = xmlKey(itemId, tipo);
+  baixandoXml.value = { ...baixandoXml.value, [key]: true };
+  erro.value = null;
+  try {
+    await downloadXmlTentativa(itemId, props.empresaId, tipo);
+  } catch (e: any) {
+    erro.value = e?.message ?? `falha ao baixar XML ${tipo}`;
+  } finally {
+    const next = { ...baixandoXml.value };
+    delete next[key];
+    baixandoXml.value = next;
+  }
 }
 </script>
 
@@ -122,18 +147,30 @@ function statusBadge(s: string) {
                   {{ t.erro_codigo }} — {{ t.erro_mensagem }}
                 </div>
                 <div class="dl">
-                  <a
+                  <button
                     v-if="t.xml_enviado_disponivel"
-                    :href="`/api/explorador/tentativa/${t.id}/xml-enviado`"
-                    target="_blank"
-                    >📤 XML enviado</a
+                    type="button"
+                    :disabled="isBaixandoXml(t.id, 'enviado')"
+                    @click="baixarXml(t.id, 'enviado')"
                   >
-                  <a
+                    {{
+                      isBaixandoXml(t.id, "enviado")
+                        ? "baixando..."
+                        : "📤 XML enviado"
+                    }}
+                  </button>
+                  <button
                     v-if="t.xml_retorno_disponivel"
-                    :href="`/api/explorador/tentativa/${t.id}/xml-retorno`"
-                    target="_blank"
-                    >📥 XML retorno</a
+                    type="button"
+                    :disabled="isBaixandoXml(t.id, 'retorno')"
+                    @click="baixarXml(t.id, 'retorno')"
                   >
+                    {{
+                      isBaixandoXml(t.id, "retorno")
+                        ? "baixando..."
+                        : "📥 XML retorno"
+                    }}
+                  </button>
                 </div>
               </li>
             </ul>
@@ -327,7 +364,10 @@ h4 {
   gap: 10px;
   flex-wrap: wrap;
 }
-.dl a {
+.dl button {
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
   font-size: 0.78rem;
   color: #c697ff;
   text-decoration: none;
@@ -335,8 +375,12 @@ h4 {
   padding: 4px 10px;
   border-radius: 8px;
 }
-.dl a:hover {
+.dl button:hover:not(:disabled) {
   background: rgba(198, 151, 255, 0.08);
+}
+.dl button:disabled {
+  cursor: wait;
+  opacity: 0.6;
 }
 
 .mono {

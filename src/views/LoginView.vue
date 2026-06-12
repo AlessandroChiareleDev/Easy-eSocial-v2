@@ -2,6 +2,7 @@
 import { ref } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
+import { useEmpresaStore } from "@/stores/empresa";
 import BrainStage from "@/components/base/BrainStage.vue";
 
 const email = ref("");
@@ -9,6 +10,7 @@ const senha = ref("");
 const showPwd = ref(false);
 
 const auth = useAuthStore();
+const empresa = useEmpresaStore();
 const router = useRouter();
 const route = useRoute();
 const devLoginEnabled = import.meta.env.DEV;
@@ -17,6 +19,7 @@ async function submit() {
   if (!email.value || !senha.value) return;
   try {
     await auth.login(email.value.trim(), senha.value);
+    empresa.clear();
     const redirect = (route.query.redirect as string) || "/";
     router.replace(redirect);
   } catch {
@@ -27,6 +30,7 @@ async function submit() {
 async function entrarLocal() {
   try {
     await auth.devLogin();
+    empresa.clear();
     const redirect = (route.query.redirect as string) || "/";
     router.replace(redirect);
   } catch {

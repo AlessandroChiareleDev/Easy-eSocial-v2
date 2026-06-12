@@ -223,9 +223,10 @@ export async function listarZips(empresaId: number) {
   );
 }
 
-export async function detalheZip(zipId: number) {
+export async function detalheZip(zipId: number, empresaId?: number) {
+  const qs = empresaId !== undefined ? `?empresa_id=${empresaId}` : "";
   return getJson<{ ok: true; zip: ZipRow & { eventos_indexados: number } }>(
-    `/api/explorador/zips/${zipId}`,
+    `/api/explorador/zips/${zipId}${qs}`,
   );
 }
 
@@ -245,8 +246,9 @@ export interface ResumoZip {
   por_per_apur: { per_apur: string; n: number }[];
 }
 
-export async function resumoZip(zipId: number) {
-  return getJson<ResumoZip>(`/api/explorador/zips/${zipId}/resumo`);
+export async function resumoZip(zipId: number, empresaId?: number) {
+  const qs = empresaId !== undefined ? `?empresa_id=${empresaId}` : "";
+  return getJson<ResumoZip>(`/api/explorador/zips/${zipId}/resumo${qs}`);
 }
 
 export async function extrairZip(
@@ -793,8 +795,49 @@ export async function downloadXmlCpf(
 
   const blob = await response.blob();
   const filename =
-    filenameFromContentDisposition(response.headers.get("content-disposition")) ||
-    `${tipo}_${cpf}_${perApur}.xml`;
+    filenameFromContentDisposition(
+      response.headers.get("content-disposition"),
+    ) || `${tipo}_${cpf}_${perApur}.xml`;
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(objectUrl);
+}
+
+export async function downloadXmlTentativa(
+  itemId: number,
+  empresaId: number,
+  tipo: "enviado" | "retorno",
+): Promise<void> {
+  const endpoint = tipo === "enviado" ? "xml-enviado" : "xml-retorno";
+  const qs = new URLSearchParams({ empresa_id: String(empresaId) });
+  const response = await fetch(
+    `${BASE}/api/explorador/tentativa/${itemId}/${endpoint}?${qs.toString()}`,
+    { headers: authHeaders() },
+  );
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    let detail = text;
+    try {
+      detail = JSON.parse(text)?.detail || text;
+    } catch {
+      // mantém resposta textual
+    }
+    throw Object.assign(new Error(detail || `HTTP ${response.status}`), {
+      status: response.status,
+    });
+  }
+
+  const blob = await response.blob();
+  const filename =
+    filenameFromContentDisposition(
+      response.headers.get("content-disposition"),
+    ) || `${tipo}_item${itemId}.xml`;
   const objectUrl = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = objectUrl;
@@ -844,12 +887,14 @@ export async function listarEventos(opts: {
   );
 }
 
-export function urlXmlEvento(eventoId: number): string {
-  return `${BASE}/api/explorador/eventos/${eventoId}/xml`;
+export function urlXmlEvento(eventoId: number, empresaId?: number): string {
+  const qs = empresaId !== undefined ? `?empresa_id=${empresaId}` : "";
+  return `${BASE}/api/explorador/eventos/${eventoId}/xml${qs}`;
 }
 
-export function urlDownloadZip(zipId: number): string {
-  return `${BASE}/api/explorador/zips/${zipId}/download`;
+export function urlDownloadZip(zipId: number, empresaId?: number): string {
+  const qs = empresaId !== undefined ? `?empresa_id=${empresaId}` : "";
+  return `${BASE}/api/explorador/zips/${zipId}/download${qs}`;
 }
 
 // ---------- helpers UI ----------

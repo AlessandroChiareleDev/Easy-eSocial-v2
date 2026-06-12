@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+import zipfile
 from typing import Any
 
 import psycopg2.extras
@@ -51,14 +52,20 @@ def _carregar_eventos_alvo(conn, empresa_id: int, per_apur: str, limite: int,
                 SELECT * FROM (
                   SELECT DISTINCT ON (ev.cpf)
                          ev.id, ev.cpf, ev.nr_recibo, ev.id_evento,
-                        ev.xml_oid, ev.xml_bytes, ev.xml_size_bytes
+                         ev.xml_oid, ev.xml_bytes, ev.xml_size_bytes,
+                         ev.zip_id, ev.xml_entry_name,
+                         z.conteudo_oid, z.tamanho_bytes, z.nome_arquivo_original
                     FROM explorador_eventos ev
                     JOIN empresa_zips_brutos z ON z.id=ev.zip_id
                    WHERE z.empresa_id=%s
                      AND ev.tipo_evento='S-1210'
                      AND ev.per_apur=%s
                      AND ev.retificado_por_id IS NULL
-                     AND (ev.xml_oid IS NOT NULL OR ev.xml_bytes IS NOT NULL)
+                            AND (
+                                    ev.xml_oid IS NOT NULL
+                                OR ev.xml_bytes IS NOT NULL
+                                OR (ev.xml_entry_name IS NOT NULL AND z.conteudo_oid IS NOT NULL)
+                            )
                      AND NOT EXISTS (
                            SELECT 1
                              FROM timeline_envio_item it
@@ -100,14 +107,20 @@ def _carregar_eventos_alvo(conn, empresa_id: int, per_apur: str, limite: int,
                 SELECT * FROM (
                   SELECT DISTINCT ON (ev.cpf)
                          ev.id, ev.cpf, ev.nr_recibo, ev.id_evento,
-                        ev.xml_oid, ev.xml_bytes, ev.xml_size_bytes
+                         ev.xml_oid, ev.xml_bytes, ev.xml_size_bytes,
+                         ev.zip_id, ev.xml_entry_name,
+                         z.conteudo_oid, z.tamanho_bytes, z.nome_arquivo_original
                     FROM explorador_eventos ev
                     JOIN empresa_zips_brutos z ON z.id=ev.zip_id
                    WHERE z.empresa_id=%s
                      AND ev.tipo_evento='S-1210'
                      AND ev.per_apur=%s
                      AND ev.retificado_por_id IS NULL
-                     AND (ev.xml_oid IS NOT NULL OR ev.xml_bytes IS NOT NULL)
+                            AND (
+                                    ev.xml_oid IS NOT NULL
+                                OR ev.xml_bytes IS NOT NULL
+                                OR (ev.xml_entry_name IS NOT NULL AND z.conteudo_oid IS NOT NULL)
+                            )
                    ORDER BY ev.cpf ASC, ev.dt_processamento DESC NULLS LAST, ev.id DESC
                 ) sub
                 LIMIT %s
@@ -130,9 +143,22 @@ def _ler_xml_evento(conn_lo, ev: dict) -> bytes:
     if xml_bytes is not None:
         return bytes(xml_bytes)
     xml_oid = ev.get("xml_oid")
-    if xml_oid is None:
-        raise ValueError(f"evento {ev.get('id')} sem xml_bytes/xml_oid")
-    return _ler_xml_lo(conn_lo, int(xml_oid))
+    if xml_oid is not None:
+        return _ler_xml_lo(conn_lo, int(xml_oid))
+
+    xml_entry_name = ev.get("xml_entry_name")
+    conteudo_oid = ev.get("conteudo_oid")
+    tamanho_bytes = ev.get("tamanho_bytes")
+    if xml_entry_name and conteudo_oid is not None and tamanho_bytes is not None:
+        reader = storage.LargeObjectReader(conn_lo, int(conteudo_oid), int(tamanho_bytes))
+        try:
+            with zipfile.ZipFile(reader, mode="r") as zip_file:
+                with zip_file.open(xml_entry_name) as xml_file:
+                    return xml_file.read()
+        finally:
+            reader.close()
+
+    raise ValueError(f"evento {ev.get('id')} sem XML recuperavel")
 
 
 def _criar_timeline_envio(conn, empresa_id: int, per_apur: str, total: int) -> tuple[int, int]:
@@ -493,10 +519,22 @@ def _processar_lote(
             except Exception:  # noqa: BLE001
                 xml_ret_oid = None
 
-        if match.get("codigo") == "201":
+        codigo = str(match.get("codigo") or "")
+        if codigo in {"201", "202"}:
+            erro_codigo = None
+            erro_mensagem = None
+            if codigo == "202":
+                ocs = match.get("ocorrencias") or []
+                msg_partes = [f"{codigo}: {match.get('descricao')}"]
+                for oc in ocs[:5]:
+                    msg_partes.append(f"  - {oc['codigo']}: {oc['descricao']}")
+                erro_codigo = codigo
+                erro_mensagem = " | ".join(msg_partes)[:1000]
             _atualizar_item(
                 conn_db, item_id,
                 status="sucesso",
+                erro_codigo=erro_codigo,
+                erro_mensagem=erro_mensagem,
                 nr_recibo_novo=match.get("nr_recibo"),
                 xml_retorno_oid=xml_ret_oid,
                 duracao_ms=durac,

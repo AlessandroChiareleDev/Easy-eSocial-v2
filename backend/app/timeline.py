@@ -345,8 +345,7 @@ def s1210_anual_overview(ano: int, empresa_id: int):
                               COUNT(*) FILTER (WHERE u.status IS NULL)                      AS pendente,
                               COUNT(*) FILTER (WHERE u.status LIKE 'erro%%'
                                                  AND u.codigo_resposta IN ('401','459'))    AS recibo_retificado,
-                              COUNT(*) FILTER (WHERE u.status LIKE 'erro%%'
-                                                 AND u.codigo_resposta = '202')             AS aceito_com_aviso
+                              COUNT(*) FILTER (WHERE u.codigo_resposta = '202')             AS aceito_com_aviso
                               FROM scope s
                               LEFT JOIN ult u ON u.cpf = s.cpf
                              GROUP BY COALESCE(s.lote_num, 1)
@@ -439,8 +438,7 @@ def s1210_anual_overview(ano: int, empresa_id: int):
                                                  AND u.status NOT LIKE 'erro%%')           AS pendente,
                               COUNT(*) FILTER (WHERE u.status LIKE 'erro%%'
                                                  AND u.erro_codigo IN ('401','459'))        AS recibo_retificado,
-                              COUNT(*) FILTER (WHERE u.status LIKE 'erro%%'
-                                                 AND u.erro_codigo = '202')                 AS aceito_com_aviso
+                              COUNT(*) FILTER (WHERE u.erro_codigo = '202')                 AS aceito_com_aviso
                               FROM scope s
                               LEFT JOIN ult u ON u.cpf = s.cpf
                             """,
@@ -927,7 +925,7 @@ def s1210_cpfs_do_mes(per_apur: str, empresa_id: int, lote_num: int = 1):
             return "erro"
         if s in ("enviando", "processando"):
             return "enviando"
-        if s == "na":
+        if s in ("na", "sem_mudanca"):
             return "na"
         return "pendente"
 

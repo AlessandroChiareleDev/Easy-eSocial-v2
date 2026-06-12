@@ -86,6 +86,12 @@ def _log_atividade(
         print(f"[WARN] _log_atividade falhou: {e}")
 
 
+def _tenant_candidates(empresa_id: int | None = None) -> list[int]:
+    if empresa_id is not None:
+        return [int(empresa_id)]
+    return sorted(int(eid) for eid in tenant._EMPRESA_SCHEMA.keys())
+
+
 # ---------------------------------------------------------------------------
 # Upload
 # ---------------------------------------------------------------------------
@@ -238,8 +244,11 @@ def listar_zips(empresa_id: int, limit: int = 100, offset: int = 0):
 
 
 @router.get("/zips/{zip_id}")
-def detalhe_zip(zip_id: int):
-    with db.cursor() as c:
+def detalhe_zip(zip_id: int, empresa_id: int | None = None):
+    eid = _achar_tenant_do_zip(zip_id, empresa_id)
+    if eid is None:
+        raise HTTPException(404, "zip não encontrado")
+    with db.cursor(empresa_id=eid) as c:
         c.execute(
             "SELECT * FROM empresa_zips_brutos WHERE id=%s",
             (zip_id,),
@@ -278,7 +287,7 @@ def reupload_zip(
 
     # 1) lê o card existente. Se empresa_id não foi passado, varre tenants conhecidos
     #    (multi-tenant: cada empresa tem seu próprio DB, então db.cursor() default = APPA).
-    tenants_a_tentar = [empresa_id] if empresa_id is not None else [tenant.APPA_ID, tenant.SOLUCOES_ID]
+    tenants_a_tentar = _tenant_candidates(empresa_id)
     row = None
     tenant_id_achado: Optional[int] = None
     for eid in tenants_a_tentar:
@@ -406,7 +415,7 @@ def deletar_zip(zip_id: int, empresa_id: Optional[int] = None):
     Multi-tenant: se `empresa_id` não vier, varre APPA e SOLUCOES até achar.
     """
     # 1) descobre em qual tenant o zip mora
-    tenants_a_tentar = [empresa_id] if empresa_id is not None else [tenant.APPA_ID, tenant.SOLUCOES_ID]
+    tenants_a_tentar = _tenant_candidates(empresa_id)
     tenant_id_achado: Optional[int] = None
     row = None
     for eid in tenants_a_tentar:
@@ -499,9 +508,12 @@ def listar_atividade(empresa_id: int, limit: int = 200):
 
 
 @router.get("/zips/{zip_id}/download")
-def download_zip(zip_id: int):
+def download_zip(zip_id: int, empresa_id: int | None = None):
     """Devolve o zip original (auditoria). Streaming direto do Large Object."""
-    with db.cursor() as c:
+    eid = _achar_tenant_do_zip(zip_id, empresa_id)
+    if eid is None:
+        raise HTTPException(404, "zip não encontrado")
+    with db.cursor(empresa_id=eid) as c:
         c.execute(
             "SELECT conteudo_oid, tamanho_bytes, nome_arquivo_original "
             "FROM empresa_zips_brutos WHERE id=%s",
@@ -511,7 +523,7 @@ def download_zip(zip_id: int):
     if not row:
         raise HTTPException(404, "zip não encontrado")
 
-    conn = db.connect()
+    conn = db.connect(empresa_id=eid)
 
     def gen():
         try:
@@ -915,14 +927,14 @@ def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False, empresa_id: int 
         # backfill chain walk para o(s) per_apur que apareceram neste zip
         try:
             from . import backfill_chain
-            with db.cursor() as _c:
+            with db.cursor(empresa_id=empresa_id) as _c:
                 _c.execute(
                     "SELECT empresa_id FROM empresa_zips_brutos WHERE id=%s",
                     (zip_id,),
                 )
                 _r = _c.fetchone()
             if _r:
-                _conn = db.connect()
+                _conn = db.connect(empresa_id=empresa_id)
                 try:
                     backfill_chain.backfill_empresa(_conn, _r["empresa_id"])
                 finally:
@@ -966,13 +978,7 @@ def _extrair_zip_sync(zip_id: int, somente_s5002: bool = False, empresa_id: int 
 
 def _achar_tenant_do_zip(zip_id: int, empresa_id: int | None) -> int | None:
     """Descobre em qual tenant esse zip realmente vive (consulta rapida)."""
-    candidatos: list[int] = []
-    if empresa_id is not None:
-        candidatos.append(empresa_id)
-        outro = tenant.APPA_ID if empresa_id == tenant.SOLUCOES_ID else tenant.SOLUCOES_ID
-        candidatos.append(outro)
-    else:
-        candidatos = [tenant.APPA_ID, tenant.SOLUCOES_ID]
+    candidatos = _tenant_candidates(empresa_id)
     for eid in candidatos:
         try:
             with db.cursor(empresa_id=eid) as c:
@@ -1081,13 +1087,7 @@ def progresso_extracao(zip_id: int, empresa_id: int | None = None):
     Procura o zip no tenant pedido e cai pra os outros tenants conhecidos
     se nao achar (mesmo padrao do /extrair).
     """
-    if empresa_id is not None:
-        tenants_a_tentar: list[int] = [empresa_id]
-        outro = tenant.APPA_ID if empresa_id == tenant.SOLUCOES_ID else tenant.SOLUCOES_ID
-        if outro not in tenants_a_tentar:
-            tenants_a_tentar.append(outro)
-    else:
-        tenants_a_tentar = [tenant.APPA_ID, tenant.SOLUCOES_ID]
+    tenants_a_tentar = _tenant_candidates(empresa_id)
 
     for eid in tenants_a_tentar:
         try:
@@ -1156,6 +1156,7 @@ def analise_s5002(payload: dict = Body(...)):
         raise HTTPException(400, "zip_ids (list[int]) obrigatório")
     zip_ids = [int(z) for z in zip_ids]
 
+    internal_id = tenant.internal_empresa_id(empresa_id)
     with db.cursor(empresa_id=empresa_id) as c:
         # zips informados (valida tenant)
         c.execute(
@@ -1165,7 +1166,7 @@ def analise_s5002(payload: dict = Body(...)):
             WHERE empresa_id=%s AND id = ANY(%s)
             ORDER BY id
             """,
-            (empresa_id, zip_ids),
+            (internal_id, zip_ids),
         )
         zips_info = [dict(r) for r in c.fetchall()]
         if not zips_info:
@@ -1316,7 +1317,8 @@ def listar_eventos(
         WHERE z.empresa_id = %s
         """
     ]
-    params: list[Any] = [empresa_id]
+    internal_id = tenant.internal_empresa_id(empresa_id)
+    params: list[Any] = [internal_id]
     if cpf:
         sql.append("AND e.cpf = %s"); params.append(cpf)
     if per_apur:
@@ -1328,7 +1330,7 @@ def listar_eventos(
     sql.append("ORDER BY e.id DESC LIMIT %s OFFSET %s")
     params.extend([limit, offset])
 
-    with db.cursor() as c:
+    with db.cursor(empresa_id=empresa_id) as c:
         c.execute(" ".join(sql), tuple(params))
         rows = [dict(r) for r in c.fetchall()]
     for r in rows:
@@ -1339,9 +1341,12 @@ def listar_eventos(
 
 
 @router.get("/zips/{zip_id}/resumo")
-def resumo_zip(zip_id: int):
+def resumo_zip(zip_id: int, empresa_id: int | None = None):
     """Retorna contagem de eventos por tipo + por perApur — pra montar 'pastas'."""
-    with db.cursor() as c:
+    eid = _achar_tenant_do_zip(zip_id, empresa_id)
+    if eid is None:
+        raise HTTPException(404, "zip não encontrado")
+    with db.cursor(empresa_id=eid) as c:
         c.execute(
             "SELECT id, dt_ini, dt_fim, nome_arquivo_original, total_xmls, "
             "extracao_status FROM empresa_zips_brutos WHERE id=%s",
@@ -1391,7 +1396,7 @@ def resumo_zip(zip_id: int):
 
 
 @router.get("/eventos/{evento_id}/xml")
-def baixar_xml(evento_id: int):
+def baixar_xml(evento_id: int, empresa_id: int | None = None):
     """Devolve o XML do evento.
 
     Estrategia:
@@ -1399,7 +1404,7 @@ def baixar_xml(evento_id: int):
          (caminho rapido, byte-a-byte do XML que estava no ZIP);
       2) fallback: extrai sob demanda do ZIP via xml_entry_name.
     """
-    with db.cursor() as c:
+    with db.cursor(empresa_id=empresa_id) as c:
         c.execute(
             """
             SELECT e.id, e.xml_entry_name, e.zip_id, e.xml_oid, e.xml_bytes, e.xml_size_bytes,
@@ -1425,7 +1430,7 @@ def baixar_xml(evento_id: int):
 
     # Caminho 1: temos LO dedicado
     if row.get("xml_oid") is not None:
-        conn = db.connect()
+        conn = db.connect(empresa_id=empresa_id)
 
         def _gen():
             try:
@@ -1443,7 +1448,7 @@ def baixar_xml(evento_id: int):
         return StreamingResponse(_gen(), media_type="application/xml", headers=headers)
 
     # Caminho 2: fallback do zip
-    conn = db.connect()
+    conn = db.connect(empresa_id=empresa_id)
     try:
         reader = storage.LargeObjectReader(conn, int(row["conteudo_oid"]), int(row["tamanho_bytes"]))
         try:

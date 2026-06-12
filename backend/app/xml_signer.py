@@ -6,6 +6,33 @@ Baseado no código de referência do repositório Projeto (comprovado em homolog
 """
 
 from lxml import etree
+
+
+def _patch_signxml_legacy_ec_names() -> None:
+    # signxml 4.0.3 ainda referencia curvas binárias removidas em cryptography
+    # mais novo. Para assinatura RSA do eSocial esses nomes não são usados, mas
+    # precisam existir para o import do signxml completar.
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    fallback = ec.SECP256R1
+    for name in (
+        "SECT163K1",
+        "SECT163R1",
+        "SECT163R2",
+        "SECT233K1",
+        "SECT233R1",
+        "SECT283K1",
+        "SECT283R1",
+        "SECT409K1",
+        "SECT409R1",
+        "SECT571K1",
+        "SECT571R1",
+    ):
+        if not hasattr(ec, name):
+            setattr(ec, name, fallback)
+
+
+_patch_signxml_legacy_ec_names()
 import signxml
 from signxml import XMLSigner
 from cryptography.hazmat.primitives.serialization import pkcs12, Encoding

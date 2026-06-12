@@ -265,7 +265,7 @@ def _processar_batch_inner(
 
     if not pacote:
         progress.add(ok=0, erro=len(falhas_prep), pendente=0, tentados=len(falhas_prep))
-        return {"ok": 0, "erro": len(falhas_prep), "pend": 0}
+        return {"ok": 0, "erro": len(falhas_prep), "pend": 0, "protocolo": None}
 
     t0 = time.time()
     print(f"{log_prefix}POST EnviarLote ({len(pacote)} eventos, amb={ambiente})", flush=True)
@@ -285,7 +285,7 @@ def _processar_batch_inner(
                             erro_codigo="EXC", erro_mensagem=msg[:1000])
         progress.add(ok=0, erro=len(pares) + len(falhas_prep), pendente=0,
                      tentados=len(pares) + len(falhas_prep))
-        return {"ok": 0, "erro": len(pares) + len(falhas_prep), "pend": 0}
+        return {"ok": 0, "erro": len(pares) + len(falhas_prep), "pend": 0, "protocolo": None}
 
     durac_envio_ms = int((time.time() - t0) * 1000)
     print(f"{log_prefix}resp http={res.get('http_status')} cd={res.get('codigo_resposta')} "
@@ -315,7 +315,7 @@ def _processar_batch_inner(
             )
         progress.add(ok=0, erro=len(pares) + len(falhas_prep), pendente=0,
                      tentados=len(pares) + len(falhas_prep))
-        return {"ok": 0, "erro": len(pares) + len(falhas_prep), "pend": 0}
+        return {"ok": 0, "erro": len(pares) + len(falhas_prep), "pend": 0, "protocolo": None}
 
     protocolo = res["protocolo"]
     print(f"{log_prefix}polling proto={protocolo}", flush=True)
@@ -363,10 +363,22 @@ def _processar_batch_inner(
             cpfs_1089.append((item_id, ev, eo))
             continue
 
-        if codigo == "201":
+        codigo_texto = str(codigo or "")
+        if codigo_texto in {"201", "202"}:
+            erro_codigo = None
+            erro_mensagem = None
+            if codigo_texto == "202":
+                ocs = match.get("ocorrencias") or []
+                msg_partes = [f"{codigo_texto}: {match.get('descricao')}"]
+                for oc in ocs[:5]:
+                    msg_partes.append(f"  - {oc['codigo']}: {oc['descricao']}")
+                erro_codigo = codigo_texto
+                erro_mensagem = " | ".join(msg_partes)[:1000]
             _atualizar_item(
                 conn_db, item_id,
                 status="sucesso",
+                erro_codigo=erro_codigo,
+                erro_mensagem=erro_mensagem,
                 nr_recibo_novo=match.get("nr_recibo"),
                 xml_retorno_oid=xml_ret_oid,
                 duracao_ms=durac,
@@ -415,7 +427,7 @@ def _processar_batch_inner(
         pendente=pend_count,
         tentados=sucesso_count + erro_count + pend_count + len(falhas_prep),
     )
-    return {"ok": sucesso_count, "erro": erro_count + len(falhas_prep), "pend": pend_count}
+    return {"ok": sucesso_count, "erro": erro_count + len(falhas_prep), "pend": pend_count, "protocolo": protocolo}
 
 
 # ---------- Orquestracao paralela ----------
@@ -476,6 +488,7 @@ def rodar_paralelo(
     sucesso_total = 0
     erro_total = 0
     pend_total = 0
+    protocolos: list[dict] = []
     with cf.ThreadPoolExecutor(max_workers=workers, thread_name_prefix="env-w") as ex:
         futs = {
             ex.submit(
@@ -495,6 +508,8 @@ def rodar_paralelo(
                 sucesso_total += r["ok"]
                 erro_total += r["erro"]
                 pend_total += r["pend"]
+                if r.get("protocolo"):
+                    protocolos.append({"batch": idx, "protocolo": r["protocolo"]})
             except Exception as e:  # noqa: BLE001
                 print(f"!! batch {idx} EXCECAO: {type(e).__name__}: {e}", flush=True)
                 erro_total += 1
@@ -521,6 +536,7 @@ def rodar_paralelo(
                 "workers": workers,
                 "batch_size": batch_size,
                 "pendente_consulta": pend_total,
+                "protocolos": sorted(protocolos, key=lambda item: item["batch"]),
             },
         )
     finally:

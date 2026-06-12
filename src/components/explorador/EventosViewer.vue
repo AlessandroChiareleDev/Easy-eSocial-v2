@@ -10,7 +10,7 @@ import {
 } from "@/services/exploradorApi";
 import EventosLista from "./EventosLista.vue";
 
-const props = defineProps<{ zip: ZipRow }>();
+const props = defineProps<{ zip: ZipRow; empresaId: number }>();
 const emit = defineEmits<{ (e: "fechar"): void }>();
 
 const loading = ref(true);
@@ -26,7 +26,7 @@ async function carregar() {
   loading.value = true;
   erro.value = null;
   try {
-    resumo.value = await resumoZip(props.zip.id);
+    resumo.value = await resumoZip(props.zip.id, props.empresaId);
   } catch (e) {
     erro.value = (e as Error).message;
   } finally {
@@ -146,7 +146,7 @@ function fmtPeriodo() {
         </div>
       </div>
       <EventosLista
-        :empresa-id="zip.empresa_id"
+        :empresa-id="empresaId"
         :zip-id="zip.id"
         :tipo-evento="tipoFiltrado"
       />

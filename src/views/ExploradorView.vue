@@ -9,8 +9,13 @@ import HistoricoAtividade from "@/components/explorador/HistoricoAtividade.vue";
 import ChainWalkPanel from "@/components/explorador/timeline/ChainWalkPanel.vue";
 
 const empresaStore = useEmpresaStore();
-// Default APPA=1 enquanto nenhuma empresa selecionada (raro pos-login).
-const empresaId = computed<number>(() => empresaStore.currentId ?? 1);
+const empresaId = computed<number | null>(() => empresaStore.currentId);
+const empresaLabel = computed(
+  () =>
+    empresaStore.current?.razao_social ??
+    empresaStore.current?.schema_name ??
+    "EMPRESA",
+);
 
 const zips = ref<ZipRow[]>([]);
 const carregando = ref(true);
@@ -20,10 +25,17 @@ const historicoRef = ref<InstanceType<typeof HistoricoAtividade> | null>(null);
 const zipVisualizando = ref<ZipRow | null>(null);
 
 async function carregar() {
+  const eid = empresaId.value;
+  if (eid == null) {
+    carregando.value = false;
+    erro.value = "Escolha uma empresa antes de abrir o Explorador.";
+    zips.value = [];
+    return;
+  }
   carregando.value = true;
   erro.value = null;
   try {
-    const r = await listarZips(empresaId.value);
+    const r = await listarZips(eid);
     zips.value = r.items;
     historicoRef.value?.carregar();
   } catch (e) {
@@ -63,7 +75,12 @@ function fecharVisualizacao() {
   <div class="explorador">
     <!-- Modo visualização (sobre o resto) -->
     <template v-if="zipVisualizando">
-      <EventosViewer :zip="zipVisualizando" @fechar="fecharVisualizacao" />
+      <EventosViewer
+        v-if="empresaId !== null"
+        :zip="zipVisualizando"
+        :empresa-id="empresaId"
+        @fechar="fecharVisualizacao"
+      />
     </template>
 
     <template v-else>
@@ -77,13 +94,17 @@ function fecharVisualizacao() {
         </div>
         <div class="empresa-pill">
           <span class="dot"></span>
-          <span>SOLUCOES</span>
+          <span>{{ empresaLabel }}</span>
         </div>
       </header>
 
       <section class="upload-section">
         <h2 class="section-title">Enviar zip</h2>
-        <ZipUploader :empresa-id="empresaId" @uploaded="onUploaded" />
+        <ZipUploader
+          v-if="empresaId !== null"
+          :empresa-id="empresaId"
+          @uploaded="onUploaded"
+        />
       </section>
 
       <section class="lista-section">
@@ -103,6 +124,7 @@ function fecharVisualizacao() {
 
         <ZipsList
           v-else
+          v-if="empresaId !== null"
           :zips="zips"
           :empresa-id="empresaId"
           @visualizar="abrirVisualizacao"
@@ -111,11 +133,15 @@ function fecharVisualizacao() {
       </section>
 
       <section class="hist-section">
-        <ChainWalkPanel :empresa-id="empresaId" />
+        <ChainWalkPanel v-if="empresaId !== null" :empresa-id="empresaId" />
       </section>
 
       <section class="hist-section">
-        <HistoricoAtividade :empresa-id="empresaId" ref="historicoRef" />
+        <HistoricoAtividade
+          v-if="empresaId !== null"
+          :empresa-id="empresaId"
+          ref="historicoRef"
+        />
       </section>
     </template>
   </div>

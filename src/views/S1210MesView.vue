@@ -47,16 +47,49 @@ interface Resp {
 
 const router = useRouter();
 const empresaStore = useEmpresaStore();
-const empresaId = computed<number>(() => empresaStore.currentId ?? 1);
+const empresaId = computed<number | null>(() => empresaStore.currentId);
+const APPA_ID = 1;
+const janeiroForaEscopo = computed(
+  () => props.per_apur.endsWith("-01") && empresaId.value === APPA_ID,
+);
 
-// Empresa Soluções (id=2) é a única com XMLs indexados — só nela o botão fica ativo
-const PODE_BAIXAR_XML = computed(() => empresaId.value === 2);
+const PODE_BAIXAR_XML = computed(() => true);
 
 const loading = ref(true);
 const error = ref<string | null>(null);
 const data = ref<Resp | null>(null);
 const filtro = ref("");
 const filtroStatus = ref<string>("todos");
+
+function rowTime(row: CpfRow): number {
+  if (!row.enviado_em) return 0;
+  const t = Date.parse(row.enviado_em);
+  return Number.isFinite(t) ? t : 0;
+}
+
+function statusRank(row: CpfRow): number {
+  if (row.status === "ok") return 4;
+  if (row.status === "erro") return 3;
+  if (row.status === "enviando") return 2;
+  if (row.status === "na") return 1;
+  return 0;
+}
+
+function dedupeCpfRows(rows: CpfRow[]): CpfRow[] {
+  const byCpf = new Map<string, CpfRow>();
+  for (const row of rows) {
+    const current = byCpf.get(row.cpf);
+    if (
+      !current ||
+      rowTime(row) > rowTime(current) ||
+      (rowTime(row) === rowTime(current) &&
+        statusRank(row) > statusRank(current))
+    ) {
+      byCpf.set(row.cpf, row);
+    }
+  }
+  return [...byCpf.values()].sort((a, b) => a.cpf.localeCompare(b.cpf));
+}
 
 const MES_LABEL: Record<string, string> = {
   "01": "Janeiro",
@@ -203,37 +236,52 @@ function abrirDetalheDoErro() {
 }
 
 async function baixarXml(r: CpfRow) {
+  const eid = empresaId.value;
+  if (eid == null) return;
+  if (janeiroForaEscopo.value) return;
   error.value = null;
   try {
-    await downloadXmlCpf(
-      r.lote_num,
-      props.per_apur,
-      r.cpf,
-      empresaId.value,
-      "S-1210",
-    );
+    await downloadXmlCpf(r.lote_num, props.per_apur, r.cpf, eid, "S-1210");
   } catch (e) {
     error.value = e instanceof Error ? e.message : "Falha ao baixar XML";
   }
 }
 
 async function carregar() {
+  const eid = empresaId.value;
+  if (eid == null) {
+    loading.value = false;
+    error.value = "Escolha uma empresa antes de abrir os CPFs do mês.";
+    data.value = null;
+    return;
+  }
   loading.value = true;
   error.value = null;
   try {
+    if (janeiroForaEscopo.value) {
+      data.value = {
+        empresa_id: eid,
+        per_apur: props.per_apur,
+        total: 0,
+        cpfs: [],
+      };
+      return;
+    }
     const resp = await s1210CpfsDoMes(
       props.per_apur,
-      empresaId.value,
+      eid,
       Number(props.lote_num),
     );
+    const rows =
+      (resp as unknown as { cpfs?: CpfRow[]; items?: CpfRow[] }).cpfs ??
+      (resp as unknown as { items: CpfRow[] }).items ??
+      [];
+    const cpfs = dedupeCpfRows(rows);
     data.value = {
       empresa_id: resp.empresa_id,
       per_apur: resp.per_apur,
-      total: resp.total,
-      cpfs:
-        (resp as unknown as { cpfs?: CpfRow[]; items?: CpfRow[] }).cpfs ??
-        (resp as unknown as { items: CpfRow[] }).items ??
-        [],
+      total: cpfs.length,
+      cpfs,
     };
   } catch (e) {
     error.value = e instanceof Error ? e.message : "Falha ao carregar CPFs";
@@ -256,6 +304,9 @@ const carregandoDetalhe = ref(false);
 const erroDetalhe = ref<string>("");
 
 async function abrirDetalhe(r: CpfRow) {
+  const eid = empresaId.value;
+  if (eid == null) return;
+  if (janeiroForaEscopo.value) return;
   detalhe.value = null;
   erroDetalhe.value = "";
   carregandoDetalhe.value = true;
@@ -264,7 +315,7 @@ async function abrirDetalhe(r: CpfRow) {
       r.lote_num,
       props.per_apur,
       r.cpf,
-      empresaId.value,
+      eid,
     );
   } catch (e) {
     erroDetalhe.value =
@@ -294,6 +345,8 @@ function fmtData(s: string | null | undefined): string {
   }
 }
 async function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
+  const eid = empresaId.value;
+  if (eid == null) return;
   if (!detalhe.value) return;
   erroDetalhe.value = "";
   try {
@@ -301,7 +354,7 @@ async function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
       detalhe.value.lote_num,
       detalhe.value.per_apur,
       detalhe.value.cpf,
-      empresaId.value,
+      eid,
       tipo,
     );
   } catch (e) {
@@ -350,6 +403,11 @@ async function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
     </section>
 
     <section v-else-if="data">
+      <div v-if="janeiroForaEscopo" class="state-empty">
+        Janeiro está fora do escopo operacional do S-1210 anual para esta
+        empresa.
+      </div>
+
       <div class="kpi-row">
         <div class="kpi-card">
           <div class="kpi-label">Total</div>
@@ -503,7 +561,7 @@ async function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
                       ? r.tem_xml
                         ? 'Baixar XML de retorno do eSocial'
                         : 'XML não indexado para este CPF'
-                      : 'Disponível apenas para empresa Soluções'
+                      : 'XML não indexado para este CPF'
                   "
                   @click.stop="baixarXml(r)"
                 >
@@ -513,7 +571,11 @@ async function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
             </tr>
             <tr v-if="!linhas.length">
               <td colspan="8" class="muted center pad">
-                Nenhum CPF corresponde aos filtros.
+                {{
+                  janeiroForaEscopo
+                    ? "Janeiro está fora do escopo operacional do S-1210 anual para esta empresa."
+                    : "Nenhum CPF corresponde aos filtros."
+                }}
               </td>
             </tr>
           </tbody>
@@ -1006,6 +1068,14 @@ async function baixarXmlDetalhe(tipo: "S-1210" | "S-5002") {
 .state-loading {
   padding: 20px;
   opacity: 0.7;
+}
+.state-empty {
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.72);
 }
 .dot {
   display: inline-block;

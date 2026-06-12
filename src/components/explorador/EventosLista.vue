@@ -107,7 +107,7 @@ watch(filtroCpf, () => {
             <td>
               <a
                 class="btn-xml"
-                :href="urlXmlEvento(ev.id)"
+                :href="urlXmlEvento(ev.id, empresaId)"
                 target="_blank"
                 rel="noopener"
                 >XML</a

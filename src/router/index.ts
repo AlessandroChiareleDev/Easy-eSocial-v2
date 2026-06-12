@@ -110,7 +110,7 @@ router.beforeEach((to) => {
   // Multi-tenant: depois do login precisa escolher empresa
   if (auth.isAuthenticated && !to.meta?.public && !to.meta?.skipEmpresa) {
     const emp = useEmpresaStore();
-    if (!emp.hasSelected) {
+    if (!emp.ensureValidSelection()) {
       return { name: "empresas", query: { redirect: to.fullPath } };
     }
   }

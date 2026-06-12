@@ -644,7 +644,11 @@ const selecaoCount = computed(() => selecionados.value.size);
               >
                 🔍 Visualizar eventos
               </button>
-              <a class="btn-ghost" :href="urlDownloadZip(z.id)" download>
+              <a
+                class="btn-ghost"
+                :href="urlDownloadZip(z.id, props.empresaId)"
+                download
+              >
                 ⬇ Baixar zip
               </a>
               <button

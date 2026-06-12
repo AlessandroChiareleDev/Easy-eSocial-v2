@@ -247,7 +247,7 @@ async function uploadUm(f: File): Promise<void> {
         `zip já existia (zip_id=${res.zip_id}) — nada gravado`,
         f.name,
       );
-      const det = await detalheZip(res.zip_id);
+      const det = await detalheZip(res.zip_id, empresaIdSnapshot);
       emit("uploaded", det.zip);
       resultados.value.push({
         nome: f.name,
@@ -321,7 +321,7 @@ async function uploadUm(f: File): Promise<void> {
           : ""),
       f.name,
     );
-    const det = await detalheZip(res.zip_id);
+    const det = await detalheZip(res.zip_id, empresaIdSnapshot);
     emit("uploaded", det.zip);
     resultados.value.push({
       nome: f.name,

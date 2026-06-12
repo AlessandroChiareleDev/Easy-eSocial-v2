@@ -60,7 +60,7 @@ function authHeaders(): Record<string, string> {
   return h;
 }
 const ano = ref<number>(2025);
-const empresaId = computed<number>(() => empresaStore.currentId ?? 1);
+const empresaId = computed<number | null>(() => empresaStore.currentId);
 const overview = ref<OverviewAnual | null>(null);
 const loading = ref(true);
 const error = ref<string | null>(null);
@@ -72,6 +72,7 @@ const lembreteDraft = ref("");
 
 const ANOS = [2024, 2025, 2026];
 const AUTO_REFRESH_MS = 5000;
+const APPA_ID = 1;
 let autoRefreshTimer: number | null = null;
 
 const MES_LABEL: Record<string, string> = {
@@ -88,6 +89,52 @@ const MES_LABEL: Record<string, string> = {
   "11": "Nov",
   "12": "Dez",
 };
+
+function isJaneiroForaEscopo(perApur: string): boolean {
+  return perApur.endsWith("-01") && empresaId.value === APPA_ID;
+}
+
+function celulaSemDados(perApur: string, loteNum = 1): Celula {
+  return {
+    per_apur: perApur,
+    lote_num: loteNum,
+    total: 0,
+    ok: 0,
+    erro: 0,
+    enviando: 0,
+    pendente: 0,
+    na: 0,
+    recibo_retificado: 0,
+    aceito_com_aviso: 0,
+    tem_xlsx: false,
+    estado: "sem_dados",
+  };
+}
+
+function normalizarMes(mes: MesLinha): MesLinha {
+  if (!isJaneiroForaEscopo(mes.per_apur)) return mes;
+  const lotes = mes.lotes.length
+    ? mes.lotes.map((c) => celulaSemDados(mes.per_apur, c.lote_num))
+    : [celulaSemDados(mes.per_apur, 1)];
+  return {
+    ...mes,
+    lotes,
+    fechado: false,
+    virtual: false,
+    nr_recibo_fechamento: null,
+    nr_recibo_abertura: null,
+    dt_fechamento: null,
+    dt_abertura: null,
+    fechamento_origem: null,
+  };
+}
+
+function normalizarOverview(raw: OverviewAnual): OverviewAnual {
+  return {
+    ...raw,
+    meses: raw.meses.map(normalizarMes),
+  };
+}
 
 function labelMes(per: string): { label: string; iso: string } {
   const [y, m] = per.split("-");
@@ -111,6 +158,7 @@ const resumo = computed(() => {
   if (!overview.value) return out;
   out.mesesTotal = overview.value.meses.length || 12;
   for (const mes of overview.value.meses) {
+    if (isJaneiroForaEscopo(mes.per_apur)) continue;
     let mesTemDados = false;
     if (mes.fechado) out.mesesFechados += 1;
     for (const c of mes.lotes) {
@@ -278,6 +326,7 @@ function excluirLembreteAberto() {
 }
 
 function abrirCelula(c: Celula) {
+  if (isJaneiroForaEscopo(c.per_apur)) return;
   if (c.estado === "sem_dados") return;
   router.push({
     name: "s1210-mes",
@@ -286,7 +335,6 @@ function abrirCelula(c: Celula) {
 }
 
 // APPA (id=1) usa 4 lotes fixos; demais (Solucoes em diante) usam lotes dinamicos.
-const APPA_ID = 1;
 const empresaUsaLotesDinamicos = computed(() => empresaId.value !== APPA_ID);
 
 const maxLotes = computed(() => {
@@ -305,6 +353,11 @@ const headersLotes = computed<number[]>(() => {
   return out;
 });
 
+const lotesResumoLabel = computed(() => {
+  const n = maxLotes.value;
+  return `${n} ${n === 1 ? "lote" : "lotes"} por mês`;
+});
+
 const gridStyle = computed(() => {
   // 140px (mes) + N colunas de lote + (acoes 90px se dinamico)
   const cols = `140px repeat(${maxLotes.value}, 1fr)${
@@ -318,6 +371,9 @@ function celulaDoLote(mes: MesLinha, lote_num: number): Celula | null {
 }
 
 async function dividirLote(mes: MesLinha) {
+  const eid = empresaId.value;
+  if (eid == null) return;
+  if (isJaneiroForaEscopo(mes.per_apur)) return;
   if (!empresaUsaLotesDinamicos.value) return;
   if (mes.lotes.length >= 2) return;
   const ok = window.confirm(
@@ -325,18 +381,15 @@ async function dividirLote(mes: MesLinha) {
   );
   if (!ok) return;
   try {
-    await fetch(
-      `/py-api/api/s1210-repo/anual/dividir-lote?empresa_id=${empresaId.value}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          per_apur: mes.per_apur,
-          lote_origem: 1,
-          lote_destino: 2,
-        }),
-      },
-    );
+    await fetch(`/py-api/api/s1210-repo/anual/dividir-lote?empresa_id=${eid}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        per_apur: mes.per_apur,
+        lote_origem: 1,
+        lote_destino: 2,
+      }),
+    });
     await carregar();
   } catch (e) {
     error.value = e instanceof Error ? e.message : "Falha ao dividir lote";
@@ -344,6 +397,9 @@ async function dividirLote(mes: MesLinha) {
 }
 
 async function unirLotes(mes: MesLinha) {
+  const eid = empresaId.value;
+  if (eid == null) return;
+  if (isJaneiroForaEscopo(mes.per_apur)) return;
   if (!empresaUsaLotesDinamicos.value) return;
   if (mes.lotes.length < 2) return;
   const ok = window.confirm(
@@ -353,18 +409,15 @@ async function unirLotes(mes: MesLinha) {
   try {
     // Move lote N..2 -> 1 (do maior pro menor)
     for (let n = mes.lotes.length; n >= 2; n--) {
-      await fetch(
-        `/py-api/api/s1210-repo/anual/unir-lotes?empresa_id=${empresaId.value}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            per_apur: mes.per_apur,
-            lote_origem: n,
-            lote_destino: 1,
-          }),
-        },
-      );
+      await fetch(`/py-api/api/s1210-repo/anual/unir-lotes?empresa_id=${eid}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          per_apur: mes.per_apur,
+          lote_origem: n,
+          lote_destino: 1,
+        }),
+      });
     }
     await carregar();
   } catch (e) {
@@ -384,9 +437,11 @@ function processarLotes() {
 }
 
 async function sincronizarFechamento() {
+  const eid = empresaId.value;
+  if (eid == null) return;
   try {
     const r = await fetch(
-      `/api/s1210-repo/anual/sync-fechamento?ano=${ano.value}&empresa_id=${empresaId.value}`,
+      `/api/s1210-repo/anual/sync-fechamento?ano=${ano.value}&empresa_id=${eid}`,
       { method: "POST", headers: authHeaders() },
     );
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -398,6 +453,9 @@ async function sincronizarFechamento() {
 }
 
 async function toggleVirtual(mes: MesLinha) {
+  const eid = empresaId.value;
+  if (eid == null) return;
+  if (isJaneiroForaEscopo(mes.per_apur)) return;
   // Bloqueia toggle quando ja existe fechamento REAL (S-1299 do eSocial).
   if (mes.fechado && !mes.virtual) return;
   const fechar = !mes.virtual;
@@ -407,7 +465,7 @@ async function toggleVirtual(mes: MesLinha) {
   if (!window.confirm(msg)) return;
   try {
     const r = await fetch(
-      `/api/s1210-repo/anual/marcar-virtual?per_apur=${encodeURIComponent(mes.per_apur)}&empresa_id=${empresaId.value}&fechar=${fechar}`,
+      `/api/s1210-repo/anual/marcar-virtual?per_apur=${encodeURIComponent(mes.per_apur)}&empresa_id=${eid}&fechar=${fechar}`,
       { method: "POST", headers: authHeaders() },
     );
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -451,15 +509,22 @@ function voltarRepositorio() {
 }
 
 async function carregar(opts: { silent?: boolean } = {}) {
+  const eid = empresaId.value;
+  if (eid == null) {
+    loading.value = false;
+    isAutoRefreshing.value = false;
+    overview.value = null;
+    error.value = "Escolha uma empresa antes de abrir o S-1210 anual.";
+    return;
+  }
   const silent = opts.silent === true;
   if (silent) isAutoRefreshing.value = true;
   else loading.value = true;
   error.value = null;
   try {
-    overview.value = (await s1210AnualOverview(
-      ano.value,
-      empresaId.value,
-    )) as unknown as OverviewAnual;
+    overview.value = normalizarOverview(
+      (await s1210AnualOverview(ano.value, eid)) as unknown as OverviewAnual,
+    );
     lastSyncedAt.value = new Date();
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Falha ao carregar S-1210";
@@ -604,7 +669,7 @@ onUnmounted(pararAutoRefresh);
           <button class="link-back" @click="voltarRepositorio">
             ← REPOSITÓRIO S-1210
           </button>
-          · 12 meses · 4 lotes por mês
+          · 12 meses · {{ lotesResumoLabel }}
         </p>
       </div>
     </section>
@@ -759,13 +824,18 @@ onUnmounted(pararAutoRefresh);
                 class="btn-virtual"
                 :class="{ 'btn-virtual--on': mes.virtual }"
                 :title="
-                  mes.fechado && !mes.virtual
-                    ? 'Mês já fechado oficialmente (S-1299) — não pode marcar virtual'
-                    : mes.virtual
-                      ? 'Remover marcação virtual'
-                      : 'Marcar como virtualmente fechado'
+                  isJaneiroForaEscopo(mes.per_apur)
+                    ? 'Janeiro fora do escopo operacional do S-1210 anual'
+                    : mes.fechado && !mes.virtual
+                      ? 'Mês já fechado oficialmente (S-1299) — não pode marcar virtual'
+                      : mes.virtual
+                        ? 'Remover marcação virtual'
+                        : 'Marcar como virtualmente fechado'
                 "
-                :disabled="mes.fechado && !mes.virtual"
+                :disabled="
+                  isJaneiroForaEscopo(mes.per_apur) ||
+                  (mes.fechado && !mes.virtual)
+                "
                 @click.stop="toggleVirtual(mes)"
               >
                 <svg

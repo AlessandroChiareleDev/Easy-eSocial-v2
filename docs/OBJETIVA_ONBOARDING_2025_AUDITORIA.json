@@ -1,0 +1,853 @@
+{
+  "zips": 12,
+  "eventos": 169261,
+  "timeline_mes": 12,
+  "timeline_envio": 12,
+  "certificados_ativos": 1,
+  "s1210_heads": [
+    {
+      "per_apur": "2025-01",
+      "cpfs_head": 806
+    },
+    {
+      "per_apur": "2025-02",
+      "cpfs_head": 887
+    },
+    {
+      "per_apur": "2025-03",
+      "cpfs_head": 982
+    },
+    {
+      "per_apur": "2025-04",
+      "cpfs_head": 986
+    },
+    {
+      "per_apur": "2025-05",
+      "cpfs_head": 840
+    },
+    {
+      "per_apur": "2025-06",
+      "cpfs_head": 996
+    },
+    {
+      "per_apur": "2025-07",
+      "cpfs_head": 995
+    },
+    {
+      "per_apur": "2025-08",
+      "cpfs_head": 1057
+    },
+    {
+      "per_apur": "2025-09",
+      "cpfs_head": 1059
+    },
+    {
+      "per_apur": "2025-10",
+      "cpfs_head": 1226
+    },
+    {
+      "per_apur": "2025-11",
+      "cpfs_head": 1284
+    }
+  ],
+  "counts": [
+    {
+      "tipo_evento": "S-1200",
+      "per_apur": "2025-01",
+      "linhas": 1770,
+      "cpfs": 871
+    },
+    {
+      "tipo_evento": "S-1210",
+      "per_apur": "2025-01",
+      "linhas": 1633,
+      "cpfs": 806
+    },
+    {
+      "tipo_evento": "S-1298",
+      "per_apur": "2025-01",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-1299",
+      "per_apur": "2025-01",
+      "linhas": 4,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-3000",
+      "per_apur": "2025-01",
+      "linhas": 827,
+      "cpfs": 806
+    },
+    {
+      "tipo_evento": "S-5001",
+      "per_apur": "2025-01",
+      "linhas": 1825,
+      "cpfs": 891
+    },
+    {
+      "tipo_evento": "S-5002",
+      "per_apur": "2025-01",
+      "linhas": 2459,
+      "cpfs": 806
+    },
+    {
+      "tipo_evento": "S-5003",
+      "per_apur": "2025-01",
+      "linhas": 1825,
+      "cpfs": 891
+    },
+    {
+      "tipo_evento": "S-5011",
+      "per_apur": "2025-01",
+      "linhas": 4,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5012",
+      "per_apur": "2025-01",
+      "linhas": 4,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5013",
+      "per_apur": "2025-01",
+      "linhas": 4,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5501",
+      "per_apur": "2025-01",
+      "linhas": 2,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5503",
+      "per_apur": "2025-01",
+      "linhas": 1,
+      "cpfs": 1
+    },
+    {
+      "tipo_evento": "S-1200",
+      "per_apur": "2025-02",
+      "linhas": 1925,
+      "cpfs": 961
+    },
+    {
+      "tipo_evento": "S-1210",
+      "per_apur": "2025-02",
+      "linhas": 1774,
+      "cpfs": 887
+    },
+    {
+      "tipo_evento": "S-1298",
+      "per_apur": "2025-02",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-1299",
+      "per_apur": "2025-02",
+      "linhas": 4,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-3000",
+      "per_apur": "2025-02",
+      "linhas": 887,
+      "cpfs": 887
+    },
+    {
+      "tipo_evento": "S-5001",
+      "per_apur": "2025-02",
+      "linhas": 2043,
+      "cpfs": 1005
+    },
+    {
+      "tipo_evento": "S-5002",
+      "per_apur": "2025-02",
+      "linhas": 2661,
+      "cpfs": 887
+    },
+    {
+      "tipo_evento": "S-5003",
+      "per_apur": "2025-02",
+      "linhas": 2043,
+      "cpfs": 1005
+    },
+    {
+      "tipo_evento": "S-5011",
+      "per_apur": "2025-02",
+      "linhas": 4,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5012",
+      "per_apur": "2025-02",
+      "linhas": 4,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5013",
+      "per_apur": "2025-02",
+      "linhas": 4,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5501",
+      "per_apur": "2025-02",
+      "linhas": 4,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5503",
+      "per_apur": "2025-02",
+      "linhas": 2,
+      "cpfs": 2
+    },
+    {
+      "tipo_evento": "S-1200",
+      "per_apur": "2025-03",
+      "linhas": 1939,
+      "cpfs": 969
+    },
+    {
+      "tipo_evento": "S-1210",
+      "per_apur": "2025-03",
+      "linhas": 1964,
+      "cpfs": 982
+    },
+    {
+      "tipo_evento": "S-1298",
+      "per_apur": "2025-03",
+      "linhas": 2,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-1299",
+      "per_apur": "2025-03",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-3000",
+      "per_apur": "2025-03",
+      "linhas": 982,
+      "cpfs": 982
+    },
+    {
+      "tipo_evento": "S-5001",
+      "per_apur": "2025-03",
+      "linhas": 2037,
+      "cpfs": 1010
+    },
+    {
+      "tipo_evento": "S-5002",
+      "per_apur": "2025-03",
+      "linhas": 2946,
+      "cpfs": 982
+    },
+    {
+      "tipo_evento": "S-5003",
+      "per_apur": "2025-03",
+      "linhas": 2037,
+      "cpfs": 1010
+    },
+    {
+      "tipo_evento": "S-5011",
+      "per_apur": "2025-03",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5012",
+      "per_apur": "2025-03",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5013",
+      "per_apur": "2025-03",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-1200",
+      "per_apur": "2025-04",
+      "linhas": 1956,
+      "cpfs": 976
+    },
+    {
+      "tipo_evento": "S-1210",
+      "per_apur": "2025-04",
+      "linhas": 1972,
+      "cpfs": 986
+    },
+    {
+      "tipo_evento": "S-1298",
+      "per_apur": "2025-04",
+      "linhas": 2,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-1299",
+      "per_apur": "2025-04",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-3000",
+      "per_apur": "2025-04",
+      "linhas": 986,
+      "cpfs": 986
+    },
+    {
+      "tipo_evento": "S-5001",
+      "per_apur": "2025-04",
+      "linhas": 2041,
+      "cpfs": 1014
+    },
+    {
+      "tipo_evento": "S-5002",
+      "per_apur": "2025-04",
+      "linhas": 2958,
+      "cpfs": 986
+    },
+    {
+      "tipo_evento": "S-5003",
+      "per_apur": "2025-04",
+      "linhas": 2041,
+      "cpfs": 1014
+    },
+    {
+      "tipo_evento": "S-5011",
+      "per_apur": "2025-04",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5012",
+      "per_apur": "2025-04",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5013",
+      "per_apur": "2025-04",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5501",
+      "per_apur": "2025-04",
+      "linhas": 6,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5503",
+      "per_apur": "2025-04",
+      "linhas": 3,
+      "cpfs": 3
+    },
+    {
+      "tipo_evento": "S-1200",
+      "per_apur": "2025-05",
+      "linhas": 1958,
+      "cpfs": 979
+    },
+    {
+      "tipo_evento": "S-1210",
+      "per_apur": "2025-05",
+      "linhas": 1681,
+      "cpfs": 840
+    },
+    {
+      "tipo_evento": "S-1298",
+      "per_apur": "2025-05",
+      "linhas": 2,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-1299",
+      "per_apur": "2025-05",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-3000",
+      "per_apur": "2025-05",
+      "linhas": 840,
+      "cpfs": 840
+    },
+    {
+      "tipo_evento": "S-5001",
+      "per_apur": "2025-05",
+      "linhas": 2081,
+      "cpfs": 1021
+    },
+    {
+      "tipo_evento": "S-5002",
+      "per_apur": "2025-05",
+      "linhas": 2521,
+      "cpfs": 840
+    },
+    {
+      "tipo_evento": "S-5003",
+      "per_apur": "2025-05",
+      "linhas": 2081,
+      "cpfs": 1021
+    },
+    {
+      "tipo_evento": "S-5011",
+      "per_apur": "2025-05",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5012",
+      "per_apur": "2025-05",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5013",
+      "per_apur": "2025-05",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-1200",
+      "per_apur": "2025-06",
+      "linhas": 1973,
+      "cpfs": 982
+    },
+    {
+      "tipo_evento": "S-1210",
+      "per_apur": "2025-06",
+      "linhas": 1994,
+      "cpfs": 996
+    },
+    {
+      "tipo_evento": "S-1298",
+      "per_apur": "2025-06",
+      "linhas": 2,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-1299",
+      "per_apur": "2025-06",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-3000",
+      "per_apur": "2025-06",
+      "linhas": 997,
+      "cpfs": 996
+    },
+    {
+      "tipo_evento": "S-5001",
+      "per_apur": "2025-06",
+      "linhas": 2079,
+      "cpfs": 1020
+    },
+    {
+      "tipo_evento": "S-5002",
+      "per_apur": "2025-06",
+      "linhas": 2991,
+      "cpfs": 996
+    },
+    {
+      "tipo_evento": "S-5003",
+      "per_apur": "2025-06",
+      "linhas": 2079,
+      "cpfs": 1020
+    },
+    {
+      "tipo_evento": "S-5011",
+      "per_apur": "2025-06",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5012",
+      "per_apur": "2025-06",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5013",
+      "per_apur": "2025-06",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5501",
+      "per_apur": "2025-06",
+      "linhas": 1,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5503",
+      "per_apur": "2025-06",
+      "linhas": 1,
+      "cpfs": 1
+    },
+    {
+      "tipo_evento": "S-1200",
+      "per_apur": "2025-07",
+      "linhas": 2081,
+      "cpfs": 1039
+    },
+    {
+      "tipo_evento": "S-1210",
+      "per_apur": "2025-07",
+      "linhas": 1990,
+      "cpfs": 995
+    },
+    {
+      "tipo_evento": "S-1298",
+      "per_apur": "2025-07",
+      "linhas": 2,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-1299",
+      "per_apur": "2025-07",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-3000",
+      "per_apur": "2025-07",
+      "linhas": 996,
+      "cpfs": 995
+    },
+    {
+      "tipo_evento": "S-5001",
+      "per_apur": "2025-07",
+      "linhas": 2178,
+      "cpfs": 1083
+    },
+    {
+      "tipo_evento": "S-5002",
+      "per_apur": "2025-07",
+      "linhas": 2985,
+      "cpfs": 995
+    },
+    {
+      "tipo_evento": "S-5003",
+      "per_apur": "2025-07",
+      "linhas": 2178,
+      "cpfs": 1083
+    },
+    {
+      "tipo_evento": "S-5011",
+      "per_apur": "2025-07",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5012",
+      "per_apur": "2025-07",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5013",
+      "per_apur": "2025-07",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5501",
+      "per_apur": "2025-07",
+      "linhas": 1,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-1200",
+      "per_apur": "2025-08",
+      "linhas": 2116,
+      "cpfs": 1057
+    },
+    {
+      "tipo_evento": "S-1210",
+      "per_apur": "2025-08",
+      "linhas": 2115,
+      "cpfs": 1057
+    },
+    {
+      "tipo_evento": "S-1298",
+      "per_apur": "2025-08",
+      "linhas": 2,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-1299",
+      "per_apur": "2025-08",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-3000",
+      "per_apur": "2025-08",
+      "linhas": 1058,
+      "cpfs": 1057
+    },
+    {
+      "tipo_evento": "S-5001",
+      "per_apur": "2025-08",
+      "linhas": 2237,
+      "cpfs": 1107
+    },
+    {
+      "tipo_evento": "S-5002",
+      "per_apur": "2025-08",
+      "linhas": 3173,
+      "cpfs": 1057
+    },
+    {
+      "tipo_evento": "S-5003",
+      "per_apur": "2025-08",
+      "linhas": 2237,
+      "cpfs": 1107
+    },
+    {
+      "tipo_evento": "S-5011",
+      "per_apur": "2025-08",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5012",
+      "per_apur": "2025-08",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5013",
+      "per_apur": "2025-08",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-1200",
+      "per_apur": "2025-09",
+      "linhas": 2451,
+      "cpfs": 1217
+    },
+    {
+      "tipo_evento": "S-1210",
+      "per_apur": "2025-09",
+      "linhas": 2136,
+      "cpfs": 1059
+    },
+    {
+      "tipo_evento": "S-1298",
+      "per_apur": "2025-09",
+      "linhas": 4,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-1299",
+      "per_apur": "2025-09",
+      "linhas": 5,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-3000",
+      "per_apur": "2025-09",
+      "linhas": 1097,
+      "cpfs": 1059
+    },
+    {
+      "tipo_evento": "S-5001",
+      "per_apur": "2025-09",
+      "linhas": 2587,
+      "cpfs": 1266
+    },
+    {
+      "tipo_evento": "S-5002",
+      "per_apur": "2025-09",
+      "linhas": 3214,
+      "cpfs": 1059
+    },
+    {
+      "tipo_evento": "S-5003",
+      "per_apur": "2025-09",
+      "linhas": 2587,
+      "cpfs": 1266
+    },
+    {
+      "tipo_evento": "S-5011",
+      "per_apur": "2025-09",
+      "linhas": 5,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5012",
+      "per_apur": "2025-09",
+      "linhas": 5,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5013",
+      "per_apur": "2025-09",
+      "linhas": 5,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-1200",
+      "per_apur": "2025-10",
+      "linhas": 3192,
+      "cpfs": 1280
+    },
+    {
+      "tipo_evento": "S-1210",
+      "per_apur": "2025-10",
+      "linhas": 2464,
+      "cpfs": 1226
+    },
+    {
+      "tipo_evento": "S-1298",
+      "per_apur": "2025-10",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-1299",
+      "per_apur": "2025-10",
+      "linhas": 4,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-3000",
+      "per_apur": "2025-10",
+      "linhas": 1235,
+      "cpfs": 1227
+    },
+    {
+      "tipo_evento": "S-5001",
+      "per_apur": "2025-10",
+      "linhas": 3311,
+      "cpfs": 1332
+    },
+    {
+      "tipo_evento": "S-5002",
+      "per_apur": "2025-10",
+      "linhas": 3697,
+      "cpfs": 1226
+    },
+    {
+      "tipo_evento": "S-5003",
+      "per_apur": "2025-10",
+      "linhas": 3311,
+      "cpfs": 1332
+    },
+    {
+      "tipo_evento": "S-5011",
+      "per_apur": "2025-10",
+      "linhas": 4,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5012",
+      "per_apur": "2025-10",
+      "linhas": 4,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5013",
+      "per_apur": "2025-10",
+      "linhas": 4,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-1200",
+      "per_apur": "2025-11",
+      "linhas": 2554,
+      "cpfs": 1269
+    },
+    {
+      "tipo_evento": "S-1210",
+      "per_apur": "2025-11",
+      "linhas": 3855,
+      "cpfs": 1284
+    },
+    {
+      "tipo_evento": "S-1298",
+      "per_apur": "2025-11",
+      "linhas": 2,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-1299",
+      "per_apur": "2025-11",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-3000",
+      "per_apur": "2025-11",
+      "linhas": 2352,
+      "cpfs": 1284
+    },
+    {
+      "tipo_evento": "S-5001",
+      "per_apur": "2025-11",
+      "linhas": 2619,
+      "cpfs": 1298
+    },
+    {
+      "tipo_evento": "S-5002",
+      "per_apur": "2025-11",
+      "linhas": 6206,
+      "cpfs": 1284
+    },
+    {
+      "tipo_evento": "S-5003",
+      "per_apur": "2025-11",
+      "linhas": 2619,
+      "cpfs": 1298
+    },
+    {
+      "tipo_evento": "S-5011",
+      "per_apur": "2025-11",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5012",
+      "per_apur": "2025-11",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-5013",
+      "per_apur": "2025-11",
+      "linhas": 3,
+      "cpfs": 0
+    },
+    {
+      "tipo_evento": "S-1200",
+      "per_apur": "2025-12",
+      "linhas": 1,
+      "cpfs": 1
+    },
+    {
+      "tipo_evento": "S-5001",
+      "per_apur": "2025-12",
+      "linhas": 196,
+      "cpfs": 173
+    },
+    {
+      "tipo_evento": "S-5003",
+      "per_apur": "2025-12",
+      "linhas": 196,
+      "cpfs": 173
+    }
+  ]
+}

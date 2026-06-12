@@ -31,6 +31,14 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/s1210-repo", tags=["s1210-detalhe"])
 
 
+def _s1210_janeiro_fora_escopo(per_apur: str, empresa_id: int | None = None) -> bool:
+    if not (bool(per_apur) and per_apur.endswith("-01")):
+        return False
+    if empresa_id is None:
+        return True
+    return int(empresa_id) == tenant.APPA_ID
+
+
 # ─── Tabelas de labels (idênticas ao V1) ──────────────────────────────
 _TP_PGTO_LABELS = {
     "1": "Pagamento de remuneração — folha mensal",
@@ -107,6 +115,8 @@ def detalhe_cpf(
         raise HTTPException(400, "CPF inválido")
     if not re.fullmatch(r"\d{4}-\d{2}", per_apur or ""):
         raise HTTPException(400, "per_apur deve estar no formato AAAA-MM")
+    if _s1210_janeiro_fora_escopo(per_apur, empresa_id):
+        raise HTTPException(404, "Janeiro esta fora do escopo operacional do S-1210 anual")
 
     cfg = tenant.get_db_config_for_empresa(empresa_id)
     internal_id = tenant.internal_empresa_id(empresa_id)
@@ -429,6 +439,8 @@ def baixar_xml_cpf(
         raise HTTPException(400, "CPF inválido")
     if not re.fullmatch(r"\d{4}-\d{2}", per_apur or ""):
         raise HTTPException(400, "per_apur deve estar no formato AAAA-MM")
+    if _s1210_janeiro_fora_escopo(per_apur, empresa_id):
+        raise HTTPException(404, "Janeiro esta fora do escopo operacional do S-1210 anual")
 
     cfg = tenant.get_db_config_for_empresa(empresa_id)
     internal_id = tenant.internal_empresa_id(empresa_id)

@@ -28,6 +28,8 @@ from . import config
 
 APPA_ID = 1
 SOLUCOES_ID = 2
+OBJETIVA_ID = 3
+CTE_ID = 4
 
 
 # ============================================================
@@ -38,6 +40,8 @@ SOLUCOES_ID = 2
 _EMPRESA_SCHEMA = {
     APPA_ID: "appa",
     SOLUCOES_ID: "solucoes",
+    OBJETIVA_ID: "objetiva",
+    CTE_ID: "cte",
 }
 
 

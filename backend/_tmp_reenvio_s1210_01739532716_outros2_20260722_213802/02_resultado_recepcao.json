@@ -1,0 +1,48 @@
+{
+  "idx": 2,
+  "entry": "ID1094455020000002025011511364871438.S-1210.xml",
+  "cpf": "01739532716",
+  "per_apur": "2024-12",
+  "recibo_retificado": "1.1.0000000030280262674",
+  "id_evento_novo": "ID1094455020000002026072221380200002",
+  "info_pgtos": [
+    {
+      "dtPgto": "2024-12-06",
+      "tpPgto": "1",
+      "ideDmDev": "1.101.1866MENSA",
+      "vrLiq": "1708.89",
+      "perRef": "2024-11"
+    },
+    {
+      "dtPgto": "2024-12-19",
+      "tpPgto": "1",
+      "ideDmDev": "1.101.2172ADIAN",
+      "vrLiq": "994.42",
+      "perRef": "2024-12"
+    },
+    {
+      "dtPgto": "2024-12-20",
+      "tpPgto": "1",
+      "ideDmDev": "1.101.157413SAL",
+      "vrLiq": "937.65",
+      "perRef": "2024"
+    }
+  ],
+  "info_ir_complem_presente": true,
+  "plan_saude_presente": false,
+  "recepcao": {
+    "http_status": 200,
+    "sucesso": true,
+    "codigo_resposta": "201",
+    "descricao": "Lote Recebido com Sucesso.",
+    "protocolo": "1.1.202607.0000000013448248414",
+    "dh_recepcao": "2026-07-22T18:38:03.447",
+    "ocorrencias": []
+  },
+  "arquivos": {
+    "original_extraido": "C:\\Users\\xandao\\Documents\\GitHub\\Easy-eSocial-v2\\backend\\_tmp_reenvio_s1210_01739532716_outros2_20260722_213802\\02_original.xml",
+    "sem_assinatura": "C:\\Users\\xandao\\Documents\\GitHub\\Easy-eSocial-v2\\backend\\_tmp_reenvio_s1210_01739532716_outros2_20260722_213802\\02_retificacao_sem_assinatura.xml",
+    "assinado": "C:\\Users\\xandao\\Documents\\GitHub\\Easy-eSocial-v2\\backend\\_tmp_reenvio_s1210_01739532716_outros2_20260722_213802\\02_retificacao_assinada.xml",
+    "retorno_recepcao": "C:\\Users\\xandao\\Documents\\GitHub\\Easy-eSocial-v2\\backend\\_tmp_reenvio_s1210_01739532716_outros2_20260722_213802\\02_retorno_recepcao.xml"
+  }
+}

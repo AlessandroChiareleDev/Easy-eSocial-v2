@@ -1,0 +1,39 @@
+{
+  "base_banco": {
+    "id": 745676,
+    "tipo_evento": "S-1210",
+    "cpf": "01739532716",
+    "per_apur": "2025-01",
+    "nr_recibo": "1.1.0000000030969039201",
+    "id_evento_original": "ID1094455020000002025022110323600004",
+    "arquivo_origem": "ID1094455020000002025022110323600004.S-1210.xml"
+  },
+  "novo_evento": {
+    "id_evento": "ID1094455020000002026072315021400001",
+    "indRetif": "2",
+    "nrRecibo": "1.1.0000000030969039201",
+    "perApur": "2025-01",
+    "cpfBenef": "01739532716",
+    "tpAmb": "1",
+    "procEmi": "1",
+    "valid_xsd": true,
+    "qtd_infoPgto": 2,
+    "infoPgto": [
+      {
+        "dtPgto": "2025-01-07",
+        "tpPgto": "1",
+        "perRef": "2024-12",
+        "ideDmDev": "1.101.1868MENSA",
+        "vrLiq": "1689.75"
+      },
+      {
+        "dtPgto": "2025-01-20",
+        "tpPgto": "1",
+        "perRef": "2025-01",
+        "ideDmDev": "1.101.2165ADIAN",
+        "vrLiq": "995.65"
+      }
+    ]
+  },
+  "saida": "C:\\Users\\xandao\\Documents\\GitHub\\Easy-eSocial-v2\\backend\\_tmp_reenvio_s1210_01739532716_recibo_30969039201_20260723_150214"
+}

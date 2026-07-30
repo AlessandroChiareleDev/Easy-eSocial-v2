@@ -1,0 +1,63 @@
+{
+  "caso": "ireni_caso_3",
+  "arquivo_base": "C:\\Users\\xandao\\Downloads\\eSocial_EventoRecibo_30969030979 reni caso 3.xml",
+  "saida": "C:\\Users\\xandao\\Documents\\GitHub\\Easy-eSocial-v2\\backend\\_tmp_reenvio_s1210_07505934740_ireni_caso_3_20260723_152124",
+  "novo_evento": {
+    "id_evento": "ID1094455020000002026072315212400001",
+    "indRetif": "2",
+    "nrRecibo": "1.1.0000000030969030979",
+    "perApur": "2025-01",
+    "cpfBenef": "07505934740",
+    "tpAmb": "1",
+    "procEmi": "1",
+    "valid_xsd": true,
+    "qtd_infoPgto": 2,
+    "infoPgto": [
+      {
+        "dtPgto": "2025-01-07",
+        "tpPgto": "1",
+        "perRef": "2024-12",
+        "ideDmDev": "1.101.1868MENSA",
+        "vrLiq": "1594.66"
+      },
+      {
+        "dtPgto": "2025-01-20",
+        "tpPgto": "1",
+        "perRef": "2025-01",
+        "ideDmDev": "1.101.2165ADIAN",
+        "vrLiq": "984.98"
+      }
+    ]
+  },
+  "recepcao": {
+    "http_status": 200,
+    "sucesso": true,
+    "codigo_resposta": "201",
+    "descricao": "Lote Recebido com Sucesso.",
+    "protocolo": "1.1.202607.0000000013450347650",
+    "dh_recepcao": "2026-07-23T12:21:25.903",
+    "ocorrencias": []
+  },
+  "consulta_processamento": {
+    "http_status": 200,
+    "sucesso": false,
+    "codigo_lote": "101",
+    "descricao_lote": "O lote de protocolo 1.1.202607.0000000013450347650 foi consultado em 23/07/2026 às 12:21:26 e encontra-se em processamento. Favor aguardar o término do processamento.",
+    "eventos": []
+  },
+  "consulta_processamento_final": {
+    "http_status": 200,
+    "sucesso": true,
+    "codigo_lote": "201",
+    "descricao_lote": "Lote processado com sucesso.",
+    "eventos": [
+      {
+        "id_evento": "ID1094455020000002026072315212400001",
+        "codigo": "201",
+        "descricao": "Sucesso.",
+        "nr_recibo": "1.1.0000000042290966215",
+        "ocorrencias": []
+      }
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "http_status": 200,
+  "sucesso": true,
+  "codigo_lote": "201",
+  "descricao_lote": "Lote processado com sucesso.",
+  "eventos": [
+    {
+      "id_evento": "ID1094455020000002026072315021400001",
+      "codigo": "201",
+      "descricao": "Sucesso.",
+      "nr_recibo": "1.1.0000000042290657878",
+      "ocorrencias": []
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "http_status": 200,
+  "sucesso": true,
+  "codigo_resposta": "201",
+  "descricao": "Lote Recebido com Sucesso.",
+  "protocolo": "1.1.202607.0000000013450882877",
+  "dh_recepcao": "2026-07-23T14:08:49.91",
+  "ocorrencias": []
+}

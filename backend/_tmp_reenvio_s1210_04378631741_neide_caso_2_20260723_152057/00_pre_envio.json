@@ -1,0 +1,32 @@
+{
+  "caso": "neide_caso_2",
+  "arquivo_base": "C:\\Users\\xandao\\Downloads\\eSocial_EventoRecibo_30969035241__neide caso 2.xml",
+  "saida": "C:\\Users\\xandao\\Documents\\GitHub\\Easy-eSocial-v2\\backend\\_tmp_reenvio_s1210_04378631741_neide_caso_2_20260723_152057",
+  "novo_evento": {
+    "id_evento": "ID1094455020000002026072315205700001",
+    "indRetif": "2",
+    "nrRecibo": "1.1.0000000030969035241",
+    "perApur": "2025-01",
+    "cpfBenef": "04378631741",
+    "tpAmb": "1",
+    "procEmi": "1",
+    "valid_xsd": true,
+    "qtd_infoPgto": 2,
+    "infoPgto": [
+      {
+        "dtPgto": "2025-01-07",
+        "tpPgto": "1",
+        "perRef": "2024-12",
+        "ideDmDev": "1.101.1868MENSA",
+        "vrLiq": "1694.45"
+      },
+      {
+        "dtPgto": "2025-01-20",
+        "tpPgto": "1",
+        "perRef": "2025-01",
+        "ideDmDev": "1.101.2165ADIAN",
+        "vrLiq": "995.65"
+      }
+    ]
+  }
+}

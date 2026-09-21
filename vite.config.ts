@@ -14,6 +14,17 @@ export default defineConfig({
   server: {
     port: 5174,
     strictPort: true,
+    // Sem isso o watcher varre `relatorios/` (>170k arquivos) e trava o dev server
+    watch: {
+      ignored: [
+        "**/relatorios/**",
+        "**/backend/**",
+        "**/.venv/**",
+        "**/dist/**",
+        "**/Solucoes Dia */**",
+        "**/md norte solucoes/**",
+      ],
+    },
     // Proxy reverso pro backend V2 unificado (FastAPI local)
     // Frontend chama sempre /api/... → same-origin, CSP fica simples
     proxy: {

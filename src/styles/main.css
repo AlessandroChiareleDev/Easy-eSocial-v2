@@ -1,4 +1,7 @@
-@import "tailwindcss";
+/* source(none): a varredura automatica percorria `relatorios/` (>170k arquivos) e travava o dev server */
+@import "tailwindcss" source(none);
+@source "../../index.html";
+@source "../**/*.{vue,ts,tsx,js,jsx,html}";
 @import "./tokens.css";
 
 /* ==========================================================================

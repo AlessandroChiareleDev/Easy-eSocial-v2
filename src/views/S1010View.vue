@@ -69,9 +69,27 @@ async function load() {
       api.get<RubricasResponse>(`/rubricas/com-problemas?${params}`),
       api.get<Progresso>("/rubricas/progresso").catch(() => null),
     ]);
-    items.value = res.rubrics ?? res.rubricas ?? res.data ?? [];
+    const raw: any[] = (res.rubrics ?? res.rubricas ?? res.data ?? []) as any[];
+    // Backend devolve os campos do V1 (codigoevento, nome_evento, natureza_atual...)
+    items.value = raw.map((r: any) => ({
+      ...r,
+      codigo: r.codigo ?? r.codigoevento,
+      descricao: r.descricao ?? r.nome_evento,
+      natureza_codigo: r.natureza_codigo ?? r.natureza_codigo_atual,
+      natureza_nome: r.natureza_nome ?? r.natureza_atual,
+      problema: r.problema ?? r.observacao ?? r.sugestao_col_f,
+      status: r.status ?? (r.natureza_nova ? `corrigida: ${r.natureza_nova}` : "pending"),
+    }));
     total.value = res.total ?? items.value.length;
-    if (prog) progress.value = prog;
+    if (prog) {
+      const p: any = prog;
+      progress.value = {
+        total: p.total ?? p.total_verificar,
+        corrigidas: p.corrigidas ?? p.total_corrigidas,
+        pendentes: p.pendentes ?? p.total_pendentes,
+        pct: p.pct ?? p.percentual,
+      };
+    }
   } catch (e) {
     error.value = e instanceof Error ? e.message : "Falha ao carregar";
     items.value = [];

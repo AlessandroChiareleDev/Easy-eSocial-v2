@@ -184,19 +184,21 @@ chown -R esocial:esocial "$APP/frontend-dist"
 say "9/9 Nginx (usa o certificado HTTPS que ja existe na VPS)"
 # O Game Panel (AMP) usava este dominio; guardamos a config dele e o Easy eSocial assume.
 [ -f "/etc/nginx/conf.d/${HOST_PUBLICO}.conf" ] && mv "/etc/nginx/conf.d/${HOST_PUBLICO}.conf" /root/gamepanel-nginx.conf.bak
-CERT=/etc/letsencrypt/live/${HOST_PUBLICO}
+# Certificado unico (certbot --webroot, cert-name easy-esocial) cobre os 3 nomes
+CERT=/etc/letsencrypt/live/easy-esocial
+[ -d "$CERT" ] || CERT=/etc/letsencrypt/live/${HOST_PUBLICO}
 cat > /etc/nginx/conf.d/easy-esocial.conf <<EOF
 server {
     listen 80;
     listen [::]:80;
-    server_name ${HOST_PUBLICO};
+    server_name ${HOST_PUBLICO} easyesocial.com.br www.easyesocial.com.br;
     location /.well-known/acme-challenge/ { root /var/www/html; }
     location / { return 301 https://\$host\$request_uri; }
 }
 server {
     listen 443 ssl http2;
     listen [::]:443 ssl http2;
-    server_name ${HOST_PUBLICO};
+    server_name ${HOST_PUBLICO} easyesocial.com.br www.easyesocial.com.br;
     ssl_certificate ${CERT}/fullchain.pem;
     ssl_certificate_key ${CERT}/privkey.pem;
     client_max_body_size 2G;
